@@ -1,11 +1,11 @@
 [project]
-name = "backend"
+name = "computer_misbehavior_detection_backend"
 version = "0.1.0"
-description = "Add your description here"
+description = "Backend for computer misbehavior detection application"
 readme = "README.md"
 requires-python = ">=3.13"
 dependencies = [
-    "aiomqtt>=2.5.1",
+    "aiomqtt>=2.5.1,<2.6",
     "alembic>=1.20.1",
     "asyncpg>=0.32.0",
     "fastapi[standard-no-fastapi-cloud-cli]>=0.162.0",

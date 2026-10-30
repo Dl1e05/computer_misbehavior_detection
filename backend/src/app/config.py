@@ -4,6 +4,7 @@ from typing import Literal, Self
 
 from pydantic import Field, PositiveInt, SecretStr, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+from sqlalchemy import URL
 
 
 class Settings(BaseSettings):
@@ -61,6 +62,17 @@ class Settings(BaseSettings):
                 "SESSION_SIGNING_KEY and CLIP_LINK_SIGNING_KEY must differ"
             )
         return self
+
+    @property
+    def database_url(self) -> URL:
+        return URL.create(
+            drivername="postgresql+asyncpg",
+            username=self.db_user,
+            password=self.db_password.get_secret_value(),
+            host=self.db_host,
+            port=self.db_port,
+            database=self.db_name,
+        )
 
 
 @lru_cache

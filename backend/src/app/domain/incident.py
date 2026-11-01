@@ -33,3 +33,22 @@ class Role(StrEnum):
 TERMINAL_STATUSES = frozenset(
     {IncidentStatus.FALSE_ALARM, IncidentStatus.NOT_CONFIRMED, IncidentStatus.CLOSED}
 )
+
+
+SEVERITY_BY_TYPE: dict[IncidentType, Severity] = {
+    IncidentType.ZONE_INTRUSION: Severity.MEDIUM,
+    IncidentType.FALL: Severity.HIGH,
+    IncidentType.FIGHT: Severity.CRITICAL,
+    IncidentType.FIRE: Severity.CRITICAL,
+}
+
+
+def severity_for(incident_type: IncidentType) -> Severity:
+    return SEVERITY_BY_TYPE[incident_type]
+
+
+SEVERITY_RANK: dict[Severity, int] = {
+    Severity.CRITICAL: 0,
+    Severity.HIGH: 1,
+    Severity.MEDIUM: 2,
+}

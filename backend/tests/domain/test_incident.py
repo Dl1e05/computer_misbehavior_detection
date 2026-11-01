@@ -1,9 +1,11 @@
 from app.domain.incident import (
+    SEVERITY_RANK,
     TERMINAL_STATUSES,
     IncidentStatus,
     IncidentType,
     Role,
     Severity,
+    severity_for,
 )
 
 
@@ -25,3 +27,26 @@ def test_terminal_statuses() -> None:
 def test_enum_values_match_srs_codes() -> None:
     assert IncidentStatus("NEW") is IncidentStatus.NEW
     assert IncidentType("zone_intrusion") is IncidentType.ZONE_INTRUSION
+
+
+def test_every_incident_type_has_a_severity() -> None:
+    for incident_type in IncidentType:
+        assert severity_for(incident_type) in Severity
+
+
+def test_severity_matches_srs() -> None:
+    assert severity_for(IncidentType.ZONE_INTRUSION) is Severity.MEDIUM
+    assert severity_for(IncidentType.FALL) is Severity.HIGH
+    assert severity_for(IncidentType.FIGHT) is Severity.CRITICAL
+    assert severity_for(IncidentType.FIRE) is Severity.CRITICAL
+
+
+def test_severity_rank_orders_critical_first() -> None:
+    shuffled = [Severity.MEDIUM, Severity.CRITICAL, Severity.HIGH]
+    result = sorted(shuffled, key=lambda s: SEVERITY_RANK[s])
+    assert result == [Severity.CRITICAL, Severity.HIGH, Severity.MEDIUM]
+
+
+def test_every_severity_has_a_rank() -> None:
+    for severity in Severity:
+        assert severity in SEVERITY_RANK

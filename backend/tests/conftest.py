@@ -1,6 +1,7 @@
 from collections.abc import Iterator
 
 import pytest
+from testcontainers.community.postgres import PostgresContainer
 
 from app.config import Settings, get_settings
 
@@ -37,3 +38,22 @@ def _test_settings(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
     get_settings.cache_clear()
     yield
     get_settings.cache_clear()
+
+
+@pytest.fixture(scope="session")
+def postgres_container() -> Iterator[PostgresContainer]:
+    with PostgresContainer(image="pgvector/pgvector:pg17") as container:
+        yield container
+
+
+@pytest.fixture
+def db_settings(
+    postgres_container: PostgresContainer, monkeypatch: pytest.MonkeyPatch
+) -> Settings:
+    monkeypatch.setenv("DB_HOST", postgres_container.get_container_host_ip())
+    monkeypatch.setenv("DB_PORT", str(postgres_container.get_exposed_port(5432)))
+    monkeypatch.setenv("DB_USER", postgres_container.username)
+    monkeypatch.setenv("DB_PASSWORD", postgres_container.password)
+    monkeypatch.setenv("DB_NAME", postgres_container.dbname)
+    get_settings.cache_clear()
+    return get_settings()

@@ -19,15 +19,15 @@ class IncidentType(StrEnum):
 
 
 class Severity(StrEnum):
-    MEDIUM = "medium"
-    HIGH = "high"
-    CRITICAL = "critical"
+    MEDIUM = "MEDIUM"
+    HIGH = "HIGH"
+    CRITICAL = "CRITICAL"
 
 
 class Role(StrEnum):
-    OPERATOR = "operator"
-    HEAD_OF_SECURITY = "head_of_security"
-    ADMINISTRATOR = "administrator"
+    OPERATOR = "OPERATOR"
+    HEAD_OF_SECURITY = "HEAD_OF_SECURITY"
+    ADMINISTRATOR = "ADMINISTRATOR"
 
 
 TERMINAL_STATUSES = frozenset(

@@ -27,6 +27,9 @@ def test_terminal_statuses() -> None:
 def test_enum_values_match_srs_codes() -> None:
     assert IncidentStatus("NEW") is IncidentStatus.NEW
     assert IncidentType("zone_intrusion") is IncidentType.ZONE_INTRUSION
+    # SRS §12.2 stores severity and role in uppercase.
+    assert Severity("CRITICAL") is Severity.CRITICAL
+    assert Role("HEAD_OF_SECURITY") is Role.HEAD_OF_SECURITY
 
 
 def test_every_incident_type_has_a_severity() -> None:

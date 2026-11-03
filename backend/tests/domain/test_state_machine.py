@@ -2,8 +2,14 @@ import itertools
 
 import pytest
 
-from app.domain.incident import IncidentStatus, IncidentType
-from app.domain.state_machine import Actor, TransitionResult, check_transition
+from app.domain.incident import TERMINAL_STATUSES, IncidentStatus, IncidentType, Role
+from app.domain.state_machine import (
+    Action,
+    Actor,
+    TransitionResult,
+    allowed_actions,
+    check_transition,
+)
 
 Case = tuple[IncidentStatus | None, IncidentStatus, Actor, IncidentType]
 
@@ -128,3 +134,62 @@ def test_refusal_reason(
     expected: TransitionResult,
 ) -> None:
     assert check_transition(current, target, actor, incident_type) is expected
+
+
+@pytest.mark.parametrize(
+    ("role", "status", "expected"),
+    [
+        pytest.param(
+            Role.OPERATOR,
+            IncidentStatus.NEW,
+            {Action.TAKE_INTO_WORK},
+            id="operator on NEW can take into work",
+        ),
+        pytest.param(
+            Role.OPERATOR,
+            IncidentStatus.IN_PROGRESS,
+            {Action.CONFIRM, Action.REJECT},
+            id="operator on IN_PROGRESS can confirm or reject",
+        ),
+        pytest.param(
+            Role.OPERATOR,
+            IncidentStatus.CONFIRMED,
+            set(),
+            id="operator cannot close",
+        ),
+        pytest.param(
+            Role.HEAD_OF_SECURITY,
+            IncidentStatus.CONFIRMED,
+            {Action.CLOSE},
+            id="head of security on CONFIRMED can close",
+        ),
+        pytest.param(
+            Role.HEAD_OF_SECURITY,
+            IncidentStatus.NEW,
+            set(),
+            id="head of security does not take into work (OQ-03)",
+        ),
+        pytest.param(
+            Role.OPERATOR,
+            IncidentStatus.SUSPECTED,
+            set(),
+            id="no user action on a suspicion",
+        ),
+    ],
+)
+def test_allowed_actions(
+    role: Role, status: IncidentStatus, expected: set[Action]
+) -> None:
+    assert allowed_actions(role, status, IncidentType.FIRE) == expected
+
+
+def test_administrator_has_no_actions() -> None:
+    for status, incident_type in itertools.product(IncidentStatus, IncidentType):
+        assert allowed_actions(Role.ADMINISTRATOR, status, incident_type) == set()
+
+
+def test_terminal_statuses_have_no_actions() -> None:
+    for role, status, incident_type in itertools.product(
+        Role, TERMINAL_STATUSES, IncidentType
+    ):
+        assert allowed_actions(role, status, incident_type) == set()

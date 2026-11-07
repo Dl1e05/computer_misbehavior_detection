@@ -12,8 +12,8 @@ def make_settings(password: str) -> Settings:
         mqtt_port=1883,
         mqtt_username="test",
         mqtt_password="test",
-        session_signing_key="test-session-key",
-        clip_link_signing_key="test-clip-link-key",
+        session_signing_key="test-session-key-0123456789abcdef",
+        clip_link_signing_key="test-clip-link-key-0123456789abcdef",
     )
 
 

@@ -1,8 +1,8 @@
 from functools import lru_cache
 from pathlib import Path
-from typing import Literal
+from typing import Literal, Self
 
-from pydantic import Field, PositiveInt, SecretStr
+from pydantic import Field, PositiveInt, SecretStr, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -12,6 +12,8 @@ class Settings(BaseSettings):
         env_file_encoding="utf-8",
         env_ignore_empty=True,
         extra="forbid",
+        # Never echo rejected values (e.g. a too-short key) into error messages.
+        hide_input_in_errors=True,
     )
 
     # Timers, in seconds
@@ -44,9 +46,21 @@ class Settings(BaseSettings):
     mqtt_username: str
     mqtt_password: SecretStr
 
-    # Independent signing secrets
-    session_signing_key: SecretStr
-    clip_link_signing_key: SecretStr
+    # Independent signing secrets (SRS §14.4): long enough for HMAC-SHA256
+    # and never the same, so a clip link can't pass as a session token.
+    session_signing_key: SecretStr = Field(min_length=32)
+    clip_link_signing_key: SecretStr = Field(min_length=32)
+
+    @model_validator(mode="after")
+    def _signing_keys_differ(self) -> Self:
+        if (
+            self.session_signing_key.get_secret_value()
+            == self.clip_link_signing_key.get_secret_value()
+        ):
+            raise ValueError(
+                "SESSION_SIGNING_KEY and CLIP_LINK_SIGNING_KEY must differ"
+            )
+        return self
 
 
 @lru_cache

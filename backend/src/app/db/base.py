@@ -45,3 +45,7 @@ class TimestampMixin:
 
 class VersionMixin:
     version: Mapped[int] = mapped_column(server_default=text("1"))
+
+
+class EntityMixin(IdMixin, TimestampMixin, VersionMixin):
+    """Standard columns for a mutable table with a UUID key (SRS §12.1)."""

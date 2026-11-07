@@ -35,6 +35,8 @@ async def test_role_is_stored_as_srs_code_and_read_back_as_enum(
     raw = await db_session.scalar(text("SELECT role FROM users"))
     assert raw == "HEAD_OF_SECURITY"
 
+    # Forget the in-memory object, so the next select really reads the row.
+    db_session.expire_all()
     user = await db_session.scalar(select(User))
     assert user is not None
     assert user.role is Role.HEAD_OF_SECURITY

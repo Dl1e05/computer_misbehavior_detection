@@ -2,7 +2,7 @@ import uuid
 
 import pytest
 from sqlalchemy import select, text
-from sqlalchemy.exc import IntegrityError
+from sqlalchemy.exc import DBAPIError, IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models import Camera, CameraSecret, Zone
@@ -68,7 +68,12 @@ async def test_zone_polygon_round_trips(db_session: AsyncSession) -> None:
     db_session.add(zone)
     await db_session.flush()
 
-    stored = await db_session.scalar(select(Zone).where(Zone.id == zone.id))
+    # Forget the in-memory object, so the next select really reads the row.
+    # Keep the id first: reading an attribute of an expired object would
+    # trigger a lazy load, which is not allowed under AsyncSession.
+    zone_id = zone.id
+    db_session.expire_all()
+    stored = await db_session.scalar(select(Zone).where(Zone.id == zone_id))
     assert stored is not None
     assert stored.polygon == [[10, 10], [200, 10], [200, 150], [10, 150]]
     assert stored.version == 1
@@ -113,3 +118,69 @@ async def test_camera_secret_is_removed_with_its_camera(
         {"id": camera.id},
     )
     assert remaining == 0
+
+
+async def test_disabled_is_not_a_camera_status(db_session: AsyncSession) -> None:
+    # "Switched off" is Camera.enabled; status is only the connection state.
+    # The column is VARCHAR(longest value), so 'disabled' is refused as too
+    # long even before the CHECK; either refusal is fine.
+    with pytest.raises(DBAPIError):
+        await db_session.execute(
+            text(
+                "INSERT INTO cameras (code, name, source_type, source_ref, status) "
+                "VALUES ('cam-x', 'X', 'rtsp', 'x', 'disabled')"
+            )
+        )
+
+
+async def test_in_place_json_changes_are_saved(db_session: AsyncSession) -> None:
+    camera = make_camera()
+    db_session.add(camera)
+    await db_session.flush()
+    zone = make_zone(camera.id)
+    db_session.add(zone)
+    await db_session.flush()
+
+    camera.access_settings["allowed_roles"] = ["OPERATOR"]
+    zone.polygon.append([5, 5])
+    await db_session.flush()
+
+    camera_id, zone_id = camera.id, zone.id
+    db_session.expire_all()
+    stored_camera = await db_session.scalar(
+        select(Camera).where(Camera.id == camera_id)
+    )
+    stored_zone = await db_session.scalar(select(Zone).where(Zone.id == zone_id))
+    assert stored_camera is not None
+    assert stored_zone is not None
+    assert stored_camera.access_settings == {"allowed_roles": ["OPERATOR"]}
+    assert len(stored_zone.polygon) == 5
+
+
+@pytest.mark.parametrize(
+    ("changes", "constraint"),
+    [
+        pytest.param({"frame_width": 0}, "ck_zones_frame_width_positive", id="width 0"),
+        pytest.param(
+            {"frame_height": -1}, "ck_zones_frame_height_positive", id="height < 0"
+        ),
+        pytest.param(
+            {"polygon": [[0, 0], [10, 10]]},
+            "ck_zones_polygon_min_3_points",
+            id="2-point polygon",
+        ),
+    ],
+)
+async def test_invalid_zone_geometry_is_rejected(
+    db_session: AsyncSession, changes: dict[str, object], constraint: str
+) -> None:
+    camera = make_camera()
+    db_session.add(camera)
+    await db_session.flush()
+
+    zone = make_zone(camera.id)
+    for name, value in changes.items():
+        setattr(zone, name, value)
+    db_session.add(zone)
+    with pytest.raises(IntegrityError, match=constraint):
+        await db_session.flush()

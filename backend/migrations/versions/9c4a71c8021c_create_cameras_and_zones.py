@@ -1,8 +1,8 @@
 """create cameras and zones
 
-Revision ID: 8015fa264527
+Revision ID: 9c4a71c8021c
 Revises: 1975fb56441c
-Create Date: 2026-11-03 20:28:07.400185
+Create Date: 2026-11-07 20:48:46.558511
 
 """
 
@@ -13,7 +13,7 @@ from alembic import op
 from sqlalchemy.dialects import postgresql
 
 # revision identifiers, used by Alembic.
-revision: str = "8015fa264527"
+revision: str = "9c4a71c8021c"
 down_revision: str | Sequence[str] | None = "1975fb56441c"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
@@ -44,7 +44,6 @@ def upgrade() -> None:
                 "online",
                 "offline",
                 "error",
-                "disabled",
                 name="camerastatus",
                 native_enum=False,
                 create_constraint=True,
@@ -131,6 +130,17 @@ def upgrade() -> None:
             nullable=False,
         ),
         sa.Column("version", sa.Integer(), server_default=sa.text("1"), nullable=False),
+        sa.CheckConstraint(
+            "CASE WHEN jsonb_typeof(polygon) = 'array' "
+            "THEN jsonb_array_length(polygon) >= 3 ELSE false END",
+            name=op.f("ck_zones_polygon_min_3_points"),
+        ),
+        sa.CheckConstraint(
+            "frame_height > 0", name=op.f("ck_zones_frame_height_positive")
+        ),
+        sa.CheckConstraint(
+            "frame_width > 0", name=op.f("ck_zones_frame_width_positive")
+        ),
         sa.ForeignKeyConstraint(
             ["camera_id"], ["cameras.id"], name=op.f("fk_zones_camera_id_cameras")
         ),

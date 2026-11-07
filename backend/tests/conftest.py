@@ -1,12 +1,14 @@
-from collections.abc import Iterator
+from collections.abc import AsyncIterator, Iterator
 from pathlib import Path
 
 import pytest
 from alembic import command
 from alembic.config import Config
+from sqlalchemy.ext.asyncio import AsyncSession
 from testcontainers.community.postgres import PostgresContainer
 
 from app.config import Settings, get_settings
+from app.db.session import build_engine
 
 REQUIRED_TEST_ENV = {
     "DB_HOST": "localhost",
@@ -67,3 +69,28 @@ def migrated_db(db_settings: Settings) -> Settings:
     config = Config(Path(__file__).resolve().parents[1] / "alembic.ini")
     command.upgrade(config, "head")
     return db_settings
+
+
+@pytest.fixture
+async def db_session(migrated_db: Settings) -> AsyncIterator[AsyncSession]:
+    """A session whose changes are rolled back after the test.
+
+    The whole test runs inside one outer transaction. The session joins it
+    through a savepoint, so even code that calls session.commit() only
+    commits the savepoint, and the final rollback undoes everything.
+    Tests therefore never see each other's rows.
+    """
+    engine = build_engine(migrated_db)
+    async with engine.connect() as connection:
+        transaction = await connection.begin()
+        session = AsyncSession(
+            bind=connection,
+            join_transaction_mode="create_savepoint",
+            expire_on_commit=False,
+        )
+        try:
+            yield session
+        finally:
+            await session.close()
+            await transaction.rollback()
+    await engine.dispose()

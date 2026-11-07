@@ -17,8 +17,10 @@ def create_app() -> FastAPI:
         engine = build_engine(settings)
         app.state.engine = engine
         app.state.session_factory = create_session_factory(engine)
-        yield
-        await app.state.engine.dispose()
+        try:
+            yield
+        finally:
+            await engine.dispose()
 
     app = FastAPI(lifespan=lifespan)
     app.include_router(main_router)

@@ -36,14 +36,14 @@ class Settings(BaseSettings):
 
     # Database connection
     db_host: str
-    db_port: PositiveInt
+    db_port: int = Field(ge=1, le=65535)
     db_user: str
     db_name: str
     db_password: SecretStr
 
     # MQTT connection
     mqtt_host: str
-    mqtt_port: PositiveInt
+    mqtt_port: int = Field(ge=1, le=65535)
     mqtt_username: str
     mqtt_password: SecretStr
 

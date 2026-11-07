@@ -12,7 +12,9 @@ from app.config import Settings
 
 
 def build_engine(settings: Settings) -> AsyncEngine:
-    return create_async_engine(settings.database_url)
+    # pre_ping checks a pooled connection before use, so the app recovers
+    # after the database container is recreated.
+    return create_async_engine(settings.database_url, pool_pre_ping=True)
 
 
 def create_session_factory(engine: AsyncEngine) -> async_sessionmaker[AsyncSession]:

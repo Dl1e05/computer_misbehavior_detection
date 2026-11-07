@@ -24,12 +24,14 @@ API часть проекта computermisbehaviordetection.
    - В `.env` только ключи приложения: неизвестный ключ остановит запуск (защита от опечаток). Настройки только для Docker Compose пишите в `compose.dev.yaml`.
 3. Создать файл паролей Mosquitto (он в `.gitignore`, у каждого свой). Пароль берётся из `.env`; скобки `( … )` нужны, чтобы значения из `.env` не остались в терминале:
    ```bash
-   : > mosquitto/passwd
+   sudo rm -f mosquitto/passwd
    ( set -a; source .env; set +a
      docker run --rm -v "$PWD/mosquitto:/m" eclipse-mosquitto:2 \
-       mosquitto_passwd -b /m/passwd "$MQTT_USERNAME" "$MQTT_PASSWORD" )
+       mosquitto_passwd -c -b /m/passwd "$MQTT_USERNAME" "$MQTT_PASSWORD" )
    sudo chown 1883:1883 mosquitto/passwd
+   sudo chmod 0600 mosquitto/passwd
    ```
+   Шаг можно повторять (например, после смены `MQTT_PASSWORD`); затем перезапустите брокер: `docker compose -f compose.dev.yaml restart mqtt`.
 4. Запустить PostgreSQL и MQTT:
    ```bash
    docker compose -f compose.dev.yaml up -d

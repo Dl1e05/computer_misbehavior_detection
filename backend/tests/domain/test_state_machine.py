@@ -4,6 +4,7 @@ import pytest
 
 from app.domain.incident import TERMINAL_STATUSES, IncidentStatus, IncidentType, Role
 from app.domain.state_machine import (
+    TRANSITIONS,
     Action,
     Actor,
     TransitionResult,
@@ -50,11 +51,48 @@ def test_allowed_list_has_expected_size() -> None:
     assert len(ALLOWED) == 25
 
 
-def test_only_srs_transitions_are_allowed() -> None:
+# (actor, target) pairs the SRS lets an actor reach from some status.
+REACHABLE: set[tuple[Actor, IncidentStatus]] = {
+    (actor, target) for _, target, actor, _ in ALLOWED
+}
+
+
+def expected_result(case: Case) -> TransitionResult:
+    _, target, actor, _ = case
+    if (actor, target) not in REACHABLE:
+        return TransitionResult.FORBIDDEN
+    if case not in ALLOWED:
+        return TransitionResult.INVALID_TRANSITION
+    return TransitionResult.ALLOWED
+
+
+def test_every_combination_gets_the_srs_result() -> None:
+    # An actor that can never reach the target is FORBIDDEN (403) whatever the
+    # current status; otherwise anything outside ALLOWED is INVALID (409).
     froms: list[IncidentStatus | None] = [None, *IncidentStatus]
     for case in itertools.product(froms, IncidentStatus, Actor, IncidentType):
-        result = check_transition(*case)
-        assert (result is TransitionResult.ALLOWED) == (case in ALLOWED), case
+        assert check_transition(*case) == expected_result(case), case
+
+
+def test_plain_strings_behave_like_enum_members() -> None:
+    # Values from JSON payloads, tokens or raw SQL rows arrive as str.
+    fight_as_new = check_transition(None, "NEW", "ML_EVENT", "fight")  # type: ignore[arg-type]
+    fight_suspected = check_transition(None, "SUSPECTED", "ML_EVENT", "fight")  # type: ignore[arg-type]
+    operator_takes = check_transition("NEW", "IN_PROGRESS", "OPERATOR", "fire")  # type: ignore[arg-type]
+
+    assert fight_as_new == TransitionResult.INVALID_TRANSITION
+    assert fight_suspected == TransitionResult.ALLOWED
+    assert operator_takes == TransitionResult.ALLOWED
+
+
+def test_human_actor_codes_match_role_codes() -> None:
+    assert Actor.OPERATOR.value == Role.OPERATOR.value
+    assert Actor.HEAD_OF_SECURITY.value == Role.HEAD_OF_SECURITY.value
+
+
+def test_terminal_statuses_are_exactly_those_without_outgoing_transitions() -> None:
+    with_outgoing = {current for current, _ in TRANSITIONS if current is not None}
+    assert set(IncidentStatus) - with_outgoing == TERMINAL_STATUSES
 
 
 @pytest.mark.parametrize(
@@ -91,6 +129,30 @@ def test_only_srs_transitions_are_allowed() -> None:
             IncidentType.FIRE,
             TransitionResult.INVALID_TRANSITION,
             id="NEW to CLOSED is not a transition",
+        ),
+        pytest.param(
+            IncidentStatus.NEW,
+            IncidentStatus.CLOSED,
+            Actor.OPERATOR,
+            IncidentType.FIRE,
+            TransitionResult.FORBIDDEN,
+            id="operator closing is forbidden in any status",
+        ),
+        pytest.param(
+            IncidentStatus.IN_PROGRESS,
+            IncidentStatus.IN_PROGRESS,
+            Actor.HEAD_OF_SECURITY,
+            IncidentType.FALL,
+            TransitionResult.FORBIDDEN,
+            id="head of security taking into work is forbidden in any status",
+        ),
+        pytest.param(
+            IncidentStatus.NEW,
+            IncidentStatus.NEW,
+            Actor.ML_EVENT,
+            IncidentType.FIGHT,
+            TransitionResult.INVALID_TRANSITION,
+            id="a repeat is not a transition",
         ),
         pytest.param(
             IncidentStatus.NEW,
@@ -180,7 +242,9 @@ def test_refusal_reason(
 def test_allowed_actions(
     role: Role, status: IncidentStatus, expected: set[Action]
 ) -> None:
-    assert allowed_actions(role, status, IncidentType.FIRE) == expected
+    # User actions (T5-T8) apply to every incident type.
+    for incident_type in IncidentType:
+        assert allowed_actions(role, status, incident_type) == expected, incident_type
 
 
 def test_administrator_has_no_actions() -> None:

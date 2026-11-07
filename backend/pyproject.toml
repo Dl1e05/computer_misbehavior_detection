@@ -24,3 +24,38 @@ dev = [
     "ruff>=0.17.2",
     "testcontainers[postgres]>=4.15.0",
 ]
+
+[build-system]
+requires = ["uv_build>=0.9.26,<0.10"]
+build-backend = "uv_build"
+
+[tool.uv.build-backend]
+module-name = "app"
+
+[tool.ruff]
+line-length = 88
+src = ["src"]
+
+[tool.ruff.lint]
+select = [
+  "E",     # Style errors
+  "F",     # Pyflakes: potential errors
+  "I",     # Import sorting
+  "B",     # Bugbear: common errors
+  "UP",    # Modern Python syntax
+  "ASYNC", # Asynchronous code checks
+  "S",     # Security checks (flake8-bandit)
+]
+
+[tool.ruff.lint.per-file-ignores]
+# S101: pytest uses assert. S105/S106: tests use fake passwords on purpose.
+"tests/**" = ["S101", "S105", "S106"]
+
+[tool.mypy]
+strict = true
+plugins = ["pydantic.mypy"]
+files = ["src", "tests"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"

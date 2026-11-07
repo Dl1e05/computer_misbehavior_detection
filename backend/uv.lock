@@ -454,7 +454,7 @@ wheels = [
 [[package]]
 name = "computer-misbehavior-detection-backend"
 version = "0.1.0"
-source = { virtual = "." }
+source = { editable = "." }
 dependencies = [
     { name = "aiomqtt" },
     { name = "alembic" },

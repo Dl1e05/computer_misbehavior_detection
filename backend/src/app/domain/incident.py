@@ -30,6 +30,13 @@ class Role(StrEnum):
     ADMINISTRATOR = "ADMINISTRATOR"
 
 
+class ClipState(StrEnum):
+    PENDING = "pending"
+    AVAILABLE = "available"
+    UNAVAILABLE = "unavailable"
+    NOT_REQUIRED = "not_required"
+
+
 TERMINAL_STATUSES = frozenset(
     {IncidentStatus.FALSE_ALARM, IncidentStatus.NOT_CONFIRMED, IncidentStatus.CLOSED}
 )

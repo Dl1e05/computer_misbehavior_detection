@@ -1,7 +1,15 @@
 import uuid
 from datetime import datetime
 
-from sqlalchemy import CheckConstraint, ForeignKey, Integer, UniqueConstraint, func
+from sqlalchemy import (
+    CheckConstraint,
+    ForeignKey,
+    Index,
+    Integer,
+    UniqueConstraint,
+    func,
+    text,
+)
 from sqlalchemy.dialects.postgresql import ARRAY
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -12,6 +20,8 @@ from app.domain.incident import (
     IncidentStatus,
     IncidentType,
     Severity,
+    TimerKind,
+    TimerState,
 )
 
 # ('zone_intrusion', 'MEDIUM'), ('fall', 'HIGH'), ... built from the domain map,
@@ -20,6 +30,9 @@ _SEVERITY_PAIRS = ", ".join(
     f"('{incident_type.value}', '{severity.value}')"
     for incident_type, severity in SEVERITY_BY_TYPE.items()
 )
+
+# Built from the enum, so the partial indexes cannot silently match nothing.
+_TIMER_PENDING = f"state = '{TimerState.PENDING.value}'"
 
 
 class Incident(EntityMixin, Base):
@@ -88,3 +101,40 @@ class Participant(EntityMixin, Base):
     # Link to the stored snapshot, not the image itself.
     snapshot_ref: Mapped[str | None]
     model_version: Mapped[str]
+
+
+class Timer(EntityMixin, Base):
+    """A deadline for an incident; the scheduler fires it (SRS §6.5)."""
+
+    __tablename__ = "timers"
+    __table_args__ = (
+        # Old FIRED/CANCELLED timers stay as history, so only PENDING rows
+        # are unique per incident and kind.
+        Index(
+            "uq_timers_one_pending_per_kind",
+            "incident_id",
+            "kind",
+            unique=True,
+            postgresql_where=text(_TIMER_PENDING),
+        ),
+        # The scheduler polls "PENDING and deadline_at <= now()" every second.
+        Index(
+            "ix_timers_pending_deadline",
+            "deadline_at",
+            postgresql_where=text(_TIMER_PENDING),
+        ),
+        CheckConstraint(
+            f"(state = '{TimerState.FIRED.value}') = (fired_at IS NOT NULL)",
+            name="fired_at_iff_fired",
+        ),
+    )
+
+    incident_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("incidents.id", ondelete="CASCADE")
+    )
+
+    kind: Mapped[TimerKind]
+    state: Mapped[TimerState] = mapped_column(server_default=TimerState.PENDING.value)
+
+    deadline_at: Mapped[datetime]
+    fired_at: Mapped[datetime | None]

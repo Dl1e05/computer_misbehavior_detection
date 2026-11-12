@@ -82,12 +82,7 @@ def upgrade() -> None:
             nullable=False,
         ),
         sa.Column("occurred_at", sa.DateTime(timezone=True), nullable=False),
-        sa.Column(
-            "created_received_at",
-            sa.DateTime(timezone=True),
-            server_default=sa.text("now()"),
-            nullable=False,
-        ),
+        sa.Column("created_received_at", sa.DateTime(timezone=True), nullable=False),
         sa.Column("in_progress_at", sa.DateTime(timezone=True), nullable=True),
         sa.Column("confirmed_at", sa.DateTime(timezone=True), nullable=True),
         sa.Column("rejected_at", sa.DateTime(timezone=True), nullable=True),
@@ -115,8 +110,12 @@ def upgrade() -> None:
             name=op.f("ck_incidents_severity_matches_type"),
         ),
         sa.CheckConstraint(
-            "status <> 'CLOSED' OR (measures IS NOT NULL AND btrim(measures) <> '')",
+            "status <> 'CLOSED' OR (measures IS NOT NULL AND measures ~ '\\S')",
             name=op.f("ck_incidents_closed_requires_measures"),
+        ),
+        sa.CheckConstraint(
+            "incident_type <> 'zone_intrusion' OR zone_id IS NOT NULL",
+            name=op.f("ck_incidents_zone_intrusion_requires_zone"),
         ),
         sa.ForeignKeyConstraint(
             ["camera_id"], ["cameras.id"], name=op.f("fk_incidents_camera_id_cameras")

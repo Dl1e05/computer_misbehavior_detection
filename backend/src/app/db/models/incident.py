@@ -3,9 +3,9 @@ from datetime import datetime
 
 from sqlalchemy import (
     CheckConstraint,
+    Float,
     ForeignKey,
     Index,
-    Integer,
     UniqueConstraint,
     func,
     text,
@@ -24,8 +24,10 @@ from app.domain.incident import (
     TimerState,
 )
 
-# ('zone_intrusion', 'MEDIUM'), ('fall', 'HIGH'), ... built from the domain map,
-# so the database rule cannot drift from severity_for().
+# ('zone_intrusion', 'MEDIUM'), ('fall', 'HIGH'), ... built from the domain map.
+# Autogenerate does not compare CHECK bodies, so changing SEVERITY_BY_TYPE
+# needs a hand-written migration; test_severity_check_matches_domain_map
+# fails until the migrated database matches.
 _SEVERITY_PAIRS = ", ".join(
     f"('{incident_type.value}', '{severity.value}')"
     for incident_type, severity in SEVERITY_BY_TYPE.items()
@@ -40,14 +42,23 @@ class Incident(EntityMixin, Base):
     __table_args__ = (
         # I7 (SRS §12.5): an incident cannot be closed without measures taken.
         CheckConstraint(
+            # The regex means "has a non-whitespace character" (btrim only
+            # strips spaces). IS NOT NULL is needed: a NULL CHECK result passes.
             f"status <> '{IncidentStatus.CLOSED.value}' "
-            "OR (measures IS NOT NULL AND btrim(measures) <> '')",
+            "OR (measures IS NOT NULL AND measures ~ '\\S')",
             name="closed_requires_measures",
         ),
         # Severity is fixed by type (SRS §5); a service bug cannot store another.
         CheckConstraint(
             f"(incident_type, severity) IN ({_SEVERITY_PAIRS})",
             name="severity_matches_type",
+        ),
+        # V11 (SRS §7.4). That the zone belongs to the camera is checked
+        # at ingest.
+        CheckConstraint(
+            f"incident_type <> '{IncidentType.ZONE_INTRUSION.value}' "
+            "OR zone_id IS NOT NULL",
+            name="zone_intrusion_requires_zone",
         ),
     )
 
@@ -66,7 +77,9 @@ class Incident(EntityMixin, Base):
     # Time from the ML event; no default, so a missing value fails loudly.
     occurred_at: Mapped[datetime]
     # Time BE received the event; timers count from this one (SRS §6.1).
-    created_received_at: Mapped[datetime] = mapped_column(server_default=func.now())
+    # Set by ingest when the message arrives: now() would be the transaction
+    # start, which is later and would only duplicate created_at.
+    created_received_at: Mapped[datetime]
 
     # status timestamps
     in_progress_at: Mapped[datetime | None]
@@ -96,8 +109,8 @@ class Participant(EntityMixin, Base):
     # Tracker id from ML, unique only within one incident.
     track_id: Mapped[str]
     confidence: Mapped[float]
-    # [x, y, width, height] in frame pixels, as sent by ML.
-    bbox: Mapped[list[int]] = mapped_column(ARRAY(Integer))
+    # [x1, y1, x2, y2] in image pixels, floats; optional (SRS §7.3).
+    bbox: Mapped[list[float] | None] = mapped_column(ARRAY(Float))
     # Link to the stored snapshot, not the image itself.
     snapshot_ref: Mapped[str | None]
     model_version: Mapped[str]
@@ -129,8 +142,9 @@ class Timer(EntityMixin, Base):
         ),
     )
 
+    # Full index: the partial ones above skip FIRED/CANCELLED history rows.
     incident_id: Mapped[uuid.UUID] = mapped_column(
-        ForeignKey("incidents.id", ondelete="CASCADE")
+        ForeignKey("incidents.id", ondelete="CASCADE"), index=True
     )
 
     kind: Mapped[TimerKind]

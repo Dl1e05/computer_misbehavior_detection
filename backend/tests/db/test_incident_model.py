@@ -7,7 +7,13 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models import Incident, Participant
-from app.domain.incident import ClipState, IncidentStatus, IncidentType, Severity
+from app.domain.incident import (
+    SEVERITY_BY_TYPE,
+    ClipState,
+    IncidentStatus,
+    IncidentType,
+    Severity,
+)
 
 
 def make_incident(camera_id: uuid.UUID, **changes: object) -> Incident:
@@ -17,6 +23,7 @@ def make_incident(camera_id: uuid.UUID, **changes: object) -> Incident:
         status=IncidentStatus.NEW,
         camera_id=camera_id,
         occurred_at=datetime(2026, 1, 1, tzinfo=UTC),
+        created_received_at=datetime(2026, 1, 1, 0, 0, 1, tzinfo=UTC),
     )
     for name, value in changes.items():
         setattr(incident, name, value)
@@ -32,7 +39,6 @@ async def test_incident_gets_database_defaults(
     await db_session.refresh(incident)
 
     assert incident.clip_state is ClipState.PENDING
-    assert incident.created_received_at.tzinfo is not None
     assert incident.version == 1
     assert incident.zone_id is None
     assert incident.measures is None
@@ -47,9 +53,68 @@ async def test_severity_must_match_incident_type(
         await db_session.flush()
 
 
+async def test_severity_check_matches_domain_map(
+    db_session: AsyncSession, camera_id: uuid.UUID, zone_id: uuid.UUID
+) -> None:
+    # Autogenerate does not compare CHECK bodies, so a change to
+    # SEVERITY_BY_TYPE without a migration would only show up here.
+    accepted = set()
+    for incident_type in IncidentType:
+        for severity in Severity:
+            try:
+                async with db_session.begin_nested():
+                    db_session.add(
+                        make_incident(
+                            camera_id,
+                            incident_type=incident_type,
+                            severity=severity,
+                            zone_id=zone_id,
+                        )
+                    )
+            except IntegrityError:
+                continue
+            accepted.add((incident_type, severity))
+
+    assert accepted == set(SEVERITY_BY_TYPE.items())
+
+
+async def test_zone_intrusion_needs_a_zone(
+    db_session: AsyncSession, camera_id: uuid.UUID
+) -> None:
+    # V11 (SRS §7.4).
+    db_session.add(
+        make_incident(
+            camera_id,
+            incident_type=IncidentType.ZONE_INTRUSION,
+            severity=Severity.MEDIUM,
+        )
+    )
+    with pytest.raises(IntegrityError, match="ck_incidents_zone_intrusion_requires"):
+        await db_session.flush()
+
+
+async def test_zone_intrusion_with_a_zone_is_accepted(
+    db_session: AsyncSession, camera_id: uuid.UUID, zone_id: uuid.UUID
+) -> None:
+    db_session.add(
+        make_incident(
+            camera_id,
+            incident_type=IncidentType.ZONE_INTRUSION,
+            severity=Severity.MEDIUM,
+            zone_id=zone_id,
+        )
+    )
+    await db_session.flush()
+
+
 @pytest.mark.parametrize(
     "measures",
-    [pytest.param(None, id="no measures"), pytest.param("   ", id="blank measures")],
+    [
+        pytest.param(None, id="no measures"),
+        pytest.param("   ", id="spaces"),
+        pytest.param("\n", id="newline"),
+        pytest.param(" \t\r\n ", id="mixed whitespace"),
+    ],
 )
 async def test_closed_incident_needs_measures(
     db_session: AsyncSession, camera_id: uuid.UUID, measures: str | None
@@ -90,6 +155,15 @@ async def test_occurred_at_is_required(
         await db_session.flush()
 
 
+async def test_received_at_is_required(
+    db_session: AsyncSession, camera_id: uuid.UUID
+) -> None:
+    # No default on purpose: ingest sets it when the message arrives.
+    db_session.add(make_incident(camera_id, created_received_at=None))
+    with pytest.raises(IntegrityError, match="created_received_at"):
+        await db_session.flush()
+
+
 async def test_incident_needs_an_existing_camera(db_session: AsyncSession) -> None:
     db_session.add(make_incident(camera_id=uuid.uuid4()))
     with pytest.raises(IntegrityError, match="fk_incidents_camera_id_cameras"):
@@ -101,7 +175,7 @@ def make_participant(incident_id: uuid.UUID, **changes: object) -> Participant:
         incident_id=incident_id,
         track_id="track-1",
         confidence=0.9,
-        bbox=[10, 20, 100, 200],
+        bbox=[412.0, 188.5, 498.0, 402.0],
         model_version="test-model-1",
     )
     for name, value in changes.items():
@@ -122,9 +196,18 @@ async def test_participant_round_trips(
         select(Participant).where(Participant.id == participant_id)
     )
     assert stored is not None
-    assert stored.bbox == [10, 20, 100, 200]
+    # The SRS sample bbox has fractional pixels.
+    assert stored.bbox == [412.0, 188.5, 498.0, 402.0]
     assert stored.confidence == 0.9
     assert stored.snapshot_ref is None
+
+
+async def test_participant_without_bbox_is_accepted(
+    db_session: AsyncSession, incident_id: uuid.UUID
+) -> None:
+    # bbox is optional in the event contract (SRS §7.3).
+    db_session.add(make_participant(incident_id, bbox=None))
+    await db_session.flush()
 
 
 async def test_track_is_unique_within_an_incident(
@@ -161,7 +244,9 @@ async def test_same_track_in_another_incident_is_accepted(
             {"confidence": -0.1}, "ck_participants_confidence_in_range", id="conf < 0"
         ),
         pytest.param(
-            {"bbox": [10, 20, 100]}, "ck_participants_bbox_has_4_values", id="3 values"
+            {"bbox": [10.0, 20.0, 100.0]},
+            "ck_participants_bbox_has_4_values",
+            id="3 values",
         ),
     ],
 )

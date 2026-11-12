@@ -27,7 +27,7 @@ def upgrade() -> None:
         sa.Column("incident_id", sa.Uuid(), nullable=False),
         sa.Column("track_id", sa.String(), nullable=False),
         sa.Column("confidence", sa.Double(), nullable=False),
-        sa.Column("bbox", postgresql.ARRAY(sa.Integer()), nullable=False),
+        sa.Column("bbox", postgresql.ARRAY(sa.Float()), nullable=True),
         sa.Column("snapshot_ref", sa.String(), nullable=True),
         sa.Column("model_version", sa.String(), nullable=False),
         sa.Column(

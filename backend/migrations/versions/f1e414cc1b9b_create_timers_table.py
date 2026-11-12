@@ -79,6 +79,9 @@ def upgrade() -> None:
         sa.PrimaryKeyConstraint("id", name=op.f("pk_timers")),
     )
     op.create_index(
+        op.f("ix_timers_incident_id"), "timers", ["incident_id"], unique=False
+    )
+    op.create_index(
         "ix_timers_pending_deadline",
         "timers",
         ["deadline_at"],
@@ -108,5 +111,6 @@ def downgrade() -> None:
         table_name="timers",
         postgresql_where=sa.text("state = 'PENDING'"),
     )
+    op.drop_index(op.f("ix_timers_incident_id"), table_name="timers")
     op.drop_table("timers")
     # ### end Alembic commands ###

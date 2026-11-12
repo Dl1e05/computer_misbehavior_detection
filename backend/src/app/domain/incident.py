@@ -30,6 +30,13 @@ class Role(StrEnum):
     ADMINISTRATOR = "ADMINISTRATOR"
 
 
+class ClipState(StrEnum):
+    PENDING = "pending"
+    AVAILABLE = "available"
+    UNAVAILABLE = "unavailable"
+    NOT_REQUIRED = "not_required"
+
+
 TERMINAL_STATUSES = frozenset(
     {IncidentStatus.FALSE_ALARM, IncidentStatus.NOT_CONFIRMED, IncidentStatus.CLOSED}
 )
@@ -52,3 +59,14 @@ SEVERITY_RANK: dict[Severity, int] = {
     Severity.HIGH: 1,
     Severity.MEDIUM: 2,
 }
+
+
+class TimerKind(StrEnum):
+    SUSPICION_TIMEOUT = "SUSPICION_TIMEOUT"
+    ESCALATION = "ESCALATION"
+
+
+class TimerState(StrEnum):
+    PENDING = "PENDING"
+    FIRED = "FIRED"
+    CANCELLED = "CANCELLED"

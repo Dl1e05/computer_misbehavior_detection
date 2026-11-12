@@ -55,6 +55,10 @@ select = [
 strict = true
 plugins = ["pydantic.mypy"]
 files = ["src", "tests"]
+# Name modules by path (tests.conftest, tests.db.conftest), so the two
+# conftest.py files do not clash; "src" keeps app importable as "app".
+explicit_package_bases = true
+mypy_path = "src"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

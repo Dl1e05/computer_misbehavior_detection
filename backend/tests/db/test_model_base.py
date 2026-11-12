@@ -3,6 +3,7 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm.exc import StaleDataError
 
+from app.db.base import Base
 from app.db.models import User
 from app.domain.incident import Role
 
@@ -48,3 +49,14 @@ async def test_updated_at_is_readable_after_update(db_session: AsyncSession) -> 
     await db_session.flush()
 
     assert user.updated_at.tzinfo is not None
+
+
+def test_no_model_misspells_table_args() -> None:
+    # SQLAlchemy silently ignores unknown class attributes, so a typo like
+    # __tableargs__ would drop every CHECK and index without any error.
+    misspelled = [
+        mapper.class_.__name__
+        for mapper in Base.registry.mappers
+        if "__tableargs__" in vars(mapper.class_)
+    ]
+    assert misspelled == []

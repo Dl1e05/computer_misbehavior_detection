@@ -1,7 +1,8 @@
 import uuid
 from datetime import datetime
 
-from sqlalchemy import CheckConstraint, ForeignKey, func
+from sqlalchemy import CheckConstraint, ForeignKey, Integer, UniqueConstraint, func
+from sqlalchemy.dialects.postgresql import ARRAY
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.base import Base, EntityMixin
@@ -59,3 +60,31 @@ class Incident(EntityMixin, Base):
     confirmed_at: Mapped[datetime | None]
     rejected_at: Mapped[datetime | None]
     closed_at: Mapped[datetime | None]
+
+
+class Participant(EntityMixin, Base):
+    """A person ML tracked in an incident; repeat events update the same row."""
+
+    __tablename__ = "participants"
+    __table_args__ = (
+        # One row per tracked person per incident. Also serves as the index
+        # for incident_id, since it is the first column.
+        UniqueConstraint("incident_id", "track_id"),
+        CheckConstraint(
+            "confidence >= 0 AND confidence <= 1", name="confidence_in_range"
+        ),
+        CheckConstraint("cardinality(bbox) = 4", name="bbox_has_4_values"),
+    )
+
+    # A participant means nothing without its incident.
+    incident_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("incidents.id", ondelete="CASCADE")
+    )
+    # Tracker id from ML, unique only within one incident.
+    track_id: Mapped[str]
+    confidence: Mapped[float]
+    # [x, y, width, height] in frame pixels, as sent by ML.
+    bbox: Mapped[list[int]] = mapped_column(ARRAY(Integer))
+    # Link to the stored snapshot, not the image itself.
+    snapshot_ref: Mapped[str | None]
+    model_version: Mapped[str]

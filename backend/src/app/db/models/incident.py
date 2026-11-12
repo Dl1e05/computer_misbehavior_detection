@@ -138,3 +138,26 @@ class Timer(EntityMixin, Base):
 
     deadline_at: Mapped[datetime]
     fired_at: Mapped[datetime | None]
+
+
+class Escalation(EntityMixin, Base):
+    """An escalation level raised for an incident (SRS §6.4)."""
+
+    __tablename__ = "escalations"
+    __table_args__ = (
+        UniqueConstraint("incident_id", "level"),
+        CheckConstraint("level > 0", name="level_positive"),
+        CheckConstraint(
+            "(acknowledged_by IS NULL) = (acknowledged_at IS NULL)",
+            name="ack_fields_together",
+        ),
+    )
+
+    incident_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("incidents.id", ondelete="CASCADE")
+    )
+    level: Mapped[int]
+    raised_at: Mapped[datetime] = mapped_column(server_default=func.now())
+
+    acknowledged_by: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("users.id"))
+    acknowledged_at: Mapped[datetime | None]

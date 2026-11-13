@@ -40,8 +40,25 @@ API часть проекта computermisbehaviordetection.
    После изменения портов или паролей в `.env` пересоздайте контейнеры: `up -d --force-recreate`.
 5. Запустить приложение: `uv run fastapi dev src/app/main.py`
 
-## Проверки перед коммитом
+## Проверки
+
+### Pre-commit (при каждом коммите)
+
+Один раз на машину, из **корня репозитория** (там лежит `.pre-commit-config.yaml`):
 
 ```bash
-uv run ruff format && uv run ruff check && uv run mypy && uv run pytest
+uv tool install pre-commit
+pre-commit install
+```
+
+При коммите, если среди изменений есть файлы из `backend/`, запускаются `ruff format`, `ruff check --fix`, `mypy` и быстрые тесты (`tests/domain`, без Docker). Если ruff что-то исправил, коммит останавливается: проверьте изменения, сделайте `git add` и закоммитьте ещё раз.
+
+Запустить все проверки вручную: `pre-commit run --all-files`.
+
+### Перед push
+
+Полный набор тестов (нужен запущенный Docker):
+
+```bash
+uv run pytest
 ```

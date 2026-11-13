@@ -1,0 +1,30 @@
+repos:
+    - repo: local
+      hooks:
+          - id: ruff-format
+            name: ruff format (backend)
+            entry: bash -c 'cd backend && uv run ruff format'
+            language: system
+            files: ^backend/
+            pass_filenames: false
+
+          - id: ruff-check
+            name: ruff check (backend)
+            entry: bash -c 'cd backend && uv run ruff check --fix'
+            language: system
+            files: ^backend/
+            pass_filenames: false
+
+          - id: mypy
+            name: mypy (backend)
+            entry: bash -c 'cd backend && uv run mypy'
+            language: system
+            files: ^backend/
+            pass_filenames: false
+
+          - id: pytest-fast
+            name: pytest (backend, domain only)
+            entry: bash -c 'cd backend && uv run pytest tests/domain -q'
+            language: system
+            files: ^backend/
+            pass_filenames: false

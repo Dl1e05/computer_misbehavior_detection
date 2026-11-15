@@ -6,4 +6,5 @@ from app.db.models.incident import Escalation as Escalation
 from app.db.models.incident import Incident as Incident
 from app.db.models.incident import Participant as Participant
 from app.db.models.incident import Timer as Timer
+from app.db.models.notification import Notification as Notification
 from app.db.models.user import User as User

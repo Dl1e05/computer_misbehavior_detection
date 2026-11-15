@@ -37,6 +37,19 @@ class ClipState(StrEnum):
     NOT_REQUIRED = "not_required"
 
 
+class ClipRecordState(StrEnum):
+    """State of the clip file itself (ТЗ §12.4).
+
+    Not the same as ClipState: that is the incident's summary and has
+    not_required instead of error.
+    """
+
+    PENDING = "pending"
+    AVAILABLE = "available"
+    UNAVAILABLE = "unavailable"
+    ERROR = "error"
+
+
 TERMINAL_STATUSES = frozenset(
     {IncidentStatus.FALSE_ALARM, IncidentStatus.NOT_CONFIRMED, IncidentStatus.CLOSED}
 )

@@ -1,8 +1,12 @@
 from app.db.models.camera import Camera as Camera
 from app.db.models.camera import CameraSecret as CameraSecret
 from app.db.models.camera import Zone as Zone
+from app.db.models.incident import Clip as Clip
 from app.db.models.incident import Escalation as Escalation
 from app.db.models.incident import Incident as Incident
 from app.db.models.incident import Participant as Participant
 from app.db.models.incident import Timer as Timer
+from app.db.models.ingest import DeadLetter as DeadLetter
+from app.db.models.ingest import ProcessedEvent as ProcessedEvent
+from app.db.models.notification import Notification as Notification
 from app.db.models.user import User as User

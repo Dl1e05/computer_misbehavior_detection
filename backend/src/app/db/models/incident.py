@@ -2,6 +2,7 @@ import uuid
 from datetime import datetime
 
 from sqlalchemy import (
+    BigInteger,
     CheckConstraint,
     Float,
     ForeignKey,
@@ -16,6 +17,7 @@ from sqlalchemy.orm import Mapped, mapped_column
 from app.db.base import Base, EntityMixin
 from app.domain.incident import (
     SEVERITY_BY_TYPE,
+    ClipRecordState,
     ClipState,
     IncidentStatus,
     IncidentType,
@@ -175,3 +177,43 @@ class Escalation(EntityMixin, Base):
 
     acknowledged_by: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("users.id"))
     acknowledged_at: Mapped[datetime | None]
+
+
+class Clip(EntityMixin, Base):
+    """The archived video fragment of a confirmed incident (SRS §13)."""
+
+    __tablename__ = "clips"
+    __table_args__ = (
+        CheckConstraint("end_at > start_at", name="end_after_start"),
+        # An available clip must be findable and verifiable. coalesce makes
+        # NULL fail too (a bare "location <> ''" is NULL, and NULL passes).
+        CheckConstraint(
+            f"state <> '{ClipRecordState.AVAILABLE.value}' "
+            "OR (coalesce(location, '') <> '' AND coalesce(checksum, '') <> '' "
+            "AND coalesce(size_bytes, 0) > 0)",
+            name="available_has_file",
+        ),
+        CheckConstraint(
+            f"(state = '{ClipRecordState.ERROR.value}') = (error_code IS NOT NULL)",
+            name="error_code_iff_error",
+        ),
+        CheckConstraint("size_bytes >= 0", name="size_not_negative"),
+    )
+
+    # One clip per incident (BE-FR-48). No CASCADE: the row points to a file
+    # in the archive, so the deletion procedure removes the file first.
+    incident_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("incidents.id"), unique=True
+    )
+    # Storage key in the clip archive, never a URL.
+    location: Mapped[str | None]
+    # Trigger minus pre-roll / plus post-roll (SRS §13.4).
+    start_at: Mapped[datetime]
+    end_at: Mapped[datetime]
+    state: Mapped[ClipRecordState] = mapped_column(
+        server_default=ClipRecordState.PENDING.value
+    )
+    error_code: Mapped[str | None]
+    # BigInteger: a plain integer column stops at about 2 GB.
+    size_bytes: Mapped[int | None] = mapped_column(BigInteger)
+    checksum: Mapped[str | None]

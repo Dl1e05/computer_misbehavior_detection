@@ -65,8 +65,8 @@ def upgrade() -> None:
             name=op.f("ck_clips_error_code_iff_error"),
         ),
         sa.CheckConstraint(
-            "state <> 'available' OR (location IS NOT NULL "
-            "AND size_bytes IS NOT NULL AND checksum IS NOT NULL)",
+            "state <> 'available' OR (coalesce(location, '') <> '' "
+            "AND coalesce(checksum, '') <> '' AND coalesce(size_bytes, 0) > 0)",
             name=op.f("ck_clips_available_has_file"),
         ),
         sa.CheckConstraint("end_at > start_at", name=op.f("ck_clips_end_after_start")),

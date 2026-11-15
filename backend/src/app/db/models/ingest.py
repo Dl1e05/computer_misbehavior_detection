@@ -2,7 +2,7 @@ import uuid
 from datetime import datetime
 from typing import Any
 
-from sqlalchemy import CheckConstraint, LargeBinary, func
+from sqlalchemy import CheckConstraint, func
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -11,14 +11,19 @@ from app.db.base import Base, IdMixin
 # Both tables are written once and never changed, so they have no
 # updated_at or version (no EntityMixin).
 
+# Lowercase hex sha256, the format of hashlib.sha256(raw).hexdigest(). One
+# format in both tables, so a dead letter can be matched to a processed event.
+_SHA256_HEX = "payload_hash ~ '^[0-9a-f]{64}$'"
+
 
 class ProcessedEvent(Base):
     """An event BE has already processed; makes redelivery safe (SRS §6.4)."""
 
     __tablename__ = "processed_events"
     __table_args__ = (
-        # sha256 as hex.
-        CheckConstraint("char_length(payload_hash) = 64", name="payload_hash_sha256"),
+        CheckConstraint(_SHA256_HEX, name="payload_hash_sha256"),
+        # NOT NULL does not stop Python None: JSONB stores it as JSON null.
+        CheckConstraint("jsonb_typeof(result) = 'object'", name="result_is_object"),
     )
 
     # ML's own event id, not generated here: a second row with the same id is
@@ -39,12 +44,15 @@ class DeadLetter(IdMixin, Base):
     """A rejected event, kept for diagnostics (SRS §7.5)."""
 
     __tablename__ = "dead_letters"
+    __table_args__ = (CheckConstraint(_SHA256_HEX, name="payload_hash_sha256"),)
 
     # Set by ingest when the message arrives, like Incident.created_received_at.
     received_at: Mapped[datetime] = mapped_column(index=True)
     topic: Mapped[str]
     failure_code: Mapped[str]
     payload_hash: Mapped[str]
-    # Raw bytes, not JSONB: a MALFORMED_JSON payload (V1) is not valid JSON,
-    # or even valid UTF-8. Ingest removes embeddings before storing (§12.6).
-    raw_payload: Mapped[bytes] = mapped_column(LargeBinary)
+    # No embedding may be stored here (SRS §12.6, §14). Ingest stores the
+    # payload only after parsing it and removing embeddings, and within the
+    # size limit; otherwise (e.g. MALFORMED_JSON) NULL, and payload_hash is
+    # all that is kept. So whatever is stored is valid JSON.
+    raw_payload: Mapped[dict[str, Any] | None] = mapped_column(JSONB)

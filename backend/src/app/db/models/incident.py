@@ -185,11 +185,12 @@ class Clip(EntityMixin, Base):
     __tablename__ = "clips"
     __table_args__ = (
         CheckConstraint("end_at > start_at", name="end_after_start"),
-        # An available clip must be findable and verifiable.
+        # An available clip must be findable and verifiable. coalesce makes
+        # NULL fail too (a bare "location <> ''" is NULL, and NULL passes).
         CheckConstraint(
             f"state <> '{ClipRecordState.AVAILABLE.value}' "
-            "OR (location IS NOT NULL AND size_bytes IS NOT NULL "
-            "AND checksum IS NOT NULL)",
+            "OR (coalesce(location, '') <> '' AND coalesce(checksum, '') <> '' "
+            "AND coalesce(size_bytes, 0) > 0)",
             name="available_has_file",
         ),
         CheckConstraint(

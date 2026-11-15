@@ -64,11 +64,19 @@ async def test_one_clip_per_incident(
         await db_session.flush()
 
 
-@pytest.mark.parametrize("missing", list(FILE_FIELDS))
+@pytest.mark.parametrize(
+    "bad",
+    [
+        *(pytest.param({name: None}, id=f"no {name}") for name in FILE_FIELDS),
+        pytest.param({"location": ""}, id="empty location"),
+        pytest.param({"checksum": ""}, id="empty checksum"),
+        pytest.param({"size_bytes": 0}, id="0 bytes"),
+    ],
+)
 async def test_available_clip_needs_its_file_fields(
-    db_session: AsyncSession, incident_id: uuid.UUID, missing: str
+    db_session: AsyncSession, incident_id: uuid.UUID, bad: dict[str, object]
 ) -> None:
-    fields = {name: value for name, value in FILE_FIELDS.items() if name != missing}
+    fields = {**FILE_FIELDS, **bad}
     db_session.add(make_clip(incident_id, state=ClipRecordState.AVAILABLE, **fields))
     with pytest.raises(IntegrityError, match="ck_clips_available_has_file"):
         await db_session.flush()

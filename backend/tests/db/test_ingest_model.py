@@ -27,9 +27,9 @@ def make_dead_letter(**changes: object) -> DeadLetter:
     dead_letter = DeadLetter(
         received_at=datetime(2026, 1, 1, tzinfo=UTC),
         topic="videoanalytics/v1/cameras/cam-02/events",
-        failure_code="MALFORMED_JSON",
+        failure_code="INVALID_EVENT_TYPE",
         payload_hash=PAYLOAD_HASH,
-        raw_payload=b"{}",
+        raw_payload={"camera_id": "cam-02", "event_type": "telepathy"},
     )
     for name, value in changes.items():
         setattr(dead_letter, name, value)
@@ -62,11 +62,17 @@ async def test_same_event_id_is_stored_once(db_session: AsyncSession) -> None:
         await db_session.flush()
 
 
-@pytest.mark.parametrize(
-    "payload_hash",
-    [pytest.param("abc", id="too short"), pytest.param("0" * 65, id="too long")],
-)
-async def test_payload_hash_must_be_sha256_hex(
+BAD_HASHES = [
+    pytest.param("abc", id="too short"),
+    pytest.param("0" * 65, id="too long"),
+    pytest.param(PAYLOAD_HASH.upper(), id="uppercase"),
+    pytest.param("z" * 64, id="not hex"),
+    pytest.param("sha256:" + PAYLOAD_HASH[:57], id="prefixed"),
+]
+
+
+@pytest.mark.parametrize("payload_hash", BAD_HASHES)
+async def test_processed_event_hash_must_be_lowercase_sha256_hex(
     db_session: AsyncSession, payload_hash: str
 ) -> None:
     db_session.add(make_processed_event(payload_hash=payload_hash))
@@ -74,13 +80,34 @@ async def test_payload_hash_must_be_sha256_hex(
         await db_session.flush()
 
 
-async def test_dead_letter_keeps_payload_that_is_not_json(
-    db_session: AsyncSession,
+@pytest.mark.parametrize("payload_hash", BAD_HASHES)
+async def test_dead_letter_hash_must_be_lowercase_sha256_hex(
+    db_session: AsyncSession, payload_hash: str
 ) -> None:
-    # Why bytea and not JSONB: a MALFORMED_JSON payload (V1) may not even be
-    # valid UTF-8.
-    garbage = b"\xff\xfe{not json"
-    dead_letter = make_dead_letter(raw_payload=garbage)
+    # Same format in both tables, so the two can be matched by hash.
+    db_session.add(make_dead_letter(payload_hash=payload_hash))
+    with pytest.raises(IntegrityError, match="ck_dead_letters_payload_hash"):
+        await db_session.flush()
+
+
+@pytest.mark.parametrize(
+    "result",
+    [
+        pytest.param(None, id="None becomes JSON null"),
+        pytest.param([], id="list"),
+        pytest.param("created", id="string"),
+    ],
+)
+async def test_processed_event_result_must_be_an_object(
+    db_session: AsyncSession, result: object
+) -> None:
+    db_session.add(make_processed_event(result=result))
+    with pytest.raises(IntegrityError, match="ck_processed_events_result_is_object"):
+        await db_session.flush()
+
+
+async def test_dead_letter_payload_round_trips(db_session: AsyncSession) -> None:
+    dead_letter = make_dead_letter()
     db_session.add(dead_letter)
     await db_session.flush()
 
@@ -90,7 +117,16 @@ async def test_dead_letter_keeps_payload_that_is_not_json(
         select(DeadLetter).where(DeadLetter.id == dead_letter_id)
     )
     assert stored is not None
-    assert stored.raw_payload == garbage
+    assert stored.raw_payload == {"camera_id": "cam-02", "event_type": "telepathy"}
+
+
+async def test_dead_letter_without_payload_is_accepted(
+    db_session: AsyncSession,
+) -> None:
+    # A MALFORMED_JSON payload may contain embeddings that cannot be
+    # removed, so ingest keeps only its hash (SRS §12.6, §14).
+    db_session.add(make_dead_letter(failure_code="MALFORMED_JSON", raw_payload=None))
+    await db_session.flush()
 
 
 async def test_dead_letter_received_at_is_required(db_session: AsyncSession) -> None:

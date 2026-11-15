@@ -28,9 +28,15 @@ def upgrade() -> None:
         sa.Column("topic", sa.String(), nullable=False),
         sa.Column("failure_code", sa.String(), nullable=False),
         sa.Column("payload_hash", sa.String(), nullable=False),
-        sa.Column("raw_payload", sa.LargeBinary(), nullable=False),
+        sa.Column(
+            "raw_payload", postgresql.JSONB(astext_type=sa.Text()), nullable=True
+        ),
         sa.Column(
             "id", sa.Uuid(), server_default=sa.text("gen_random_uuid()"), nullable=False
+        ),
+        sa.CheckConstraint(
+            "payload_hash ~ '^[0-9a-f]{64}$'",
+            name=op.f("ck_dead_letters_payload_hash_sha256"),
         ),
         sa.PrimaryKeyConstraint("id", name=op.f("pk_dead_letters")),
     )
@@ -52,8 +58,12 @@ def upgrade() -> None:
             nullable=False,
         ),
         sa.CheckConstraint(
-            "char_length(payload_hash) = 64",
+            "payload_hash ~ '^[0-9a-f]{64}$'",
             name=op.f("ck_processed_events_payload_hash_sha256"),
+        ),
+        sa.CheckConstraint(
+            "jsonb_typeof(result) = 'object'",
+            name=op.f("ck_processed_events_result_is_object"),
         ),
         sa.PrimaryKeyConstraint("event_id", name=op.f("pk_processed_events")),
     )

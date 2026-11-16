@@ -17,6 +17,9 @@ API часть проекта computermisbehaviordetection.
    cp .env.example .env
    ```
    - `DB_PORT` — свободный порт (например `5433`, если на машине уже есть PostgreSQL на `5432`).
+   - Два пользователя БД, с **разными** именами и паролями:
+     - `DB_MIGRATION_USER` / `DB_MIGRATION_PASSWORD` — владелец схемы, только для миграций (Alembic);
+     - `DB_USER` / `DB_PASSWORD` — ограниченный пользователь приложения: не может менять или удалять Audit (BE-FR-75). Его создаёт `postgres/init/` при первом запуске базы.
    - Ключи подписи (`SESSION_SIGNING_KEY`, `CLIP_LINK_SIGNING_KEY`) — минимум 32 символа и разные. Сгенерировать:
      ```bash
      uv run python -c "import secrets; print(secrets.token_urlsafe(32))"
@@ -34,11 +37,13 @@ API часть проекта computermisbehaviordetection.
    Шаг можно повторять (например, после смены `MQTT_PASSWORD`); затем перезапустите брокер: `docker compose -f compose.dev.yaml restart mqtt`.
 4. Запустить PostgreSQL и MQTT:
    ```bash
-   docker compose -f compose.dev.yaml up -d
-   docker compose -f compose.dev.yaml ps   # database: healthy
+   docker compose -f compose.dev.yaml up -d --wait   # ждёт, пока база станет healthy
    ```
-   После изменения портов или паролей в `.env` пересоздайте контейнеры: `up -d --force-recreate`.
-5. Запустить приложение: `uv run fastapi dev src/app/main.py`
+   После изменения портов в `.env` пересоздайте контейнеры: `up -d --force-recreate`.
+   Пользователи и пароли БД задаются **только при создании тома**: после их смены в `.env` нужно `docker compose -f compose.dev.yaml down -v` (удаляет данные dev-базы) и снова `up -d --wait`.
+   Без `--wait` миграции могут запуститься, пока база ещё инициализируется (`Connection reset by peer`).
+5. Применить миграции: `uv run alembic upgrade head`
+6. Запустить приложение: `uv run fastapi dev src/app/main.py`
 
 ## Проверки
 

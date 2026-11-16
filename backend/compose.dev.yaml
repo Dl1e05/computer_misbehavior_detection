@@ -4,11 +4,16 @@ services:
     ports:
       - "127.0.0.1:${DB_PORT:?DB_PORT is required in .env}:5432"
     environment:
-      POSTGRES_USER: ${DB_USER:?DB_USER is required in .env}
-      POSTGRES_PASSWORD: ${DB_PASSWORD:?DB_PASSWORD is required in .env}
+      # Schema owner (runs migrations). The app connects as DB_USER instead,
+      # which postgres/init creates on first start.
+      POSTGRES_USER: ${DB_MIGRATION_USER:?DB_MIGRATION_USER is required in .env}
+      POSTGRES_PASSWORD: ${DB_MIGRATION_PASSWORD:?DB_MIGRATION_PASSWORD is required in .env}
       POSTGRES_DB: ${DB_NAME:?DB_NAME is required in .env}
+      APP_DB_USER: ${DB_USER:?DB_USER is required in .env}
+      APP_DB_PASSWORD: ${DB_PASSWORD:?DB_PASSWORD is required in .env}
     volumes:
       - postgres_data:/var/lib/postgresql/data
+      - ./postgres/init:/docker-entrypoint-initdb.d:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U \"$${POSTGRES_USER}\" -d \"$${POSTGRES_DB}\""]
       interval: 5s

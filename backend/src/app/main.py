@@ -5,7 +5,11 @@ from fastapi import FastAPI
 
 from app.api.v1 import main_router
 from app.config import get_settings
-from app.db.session import build_engine, create_session_factory
+from app.db.session import (
+    build_engine,
+    check_app_role_is_limited,
+    create_session_factory,
+)
 
 
 def create_app() -> FastAPI:
@@ -15,9 +19,10 @@ def create_app() -> FastAPI:
         # DB engine once at startup and closes it at shutdown.
         settings = get_settings()
         engine = build_engine(settings)
-        app.state.engine = engine
-        app.state.session_factory = create_session_factory(engine)
         try:
+            await check_app_role_is_limited(engine)
+            app.state.engine = engine
+            app.state.session_factory = create_session_factory(engine)
             yield
         finally:
             await engine.dispose()

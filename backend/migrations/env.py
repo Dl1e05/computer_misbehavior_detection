@@ -2,7 +2,7 @@ import asyncio
 from logging.config import fileConfig
 
 from alembic import context
-from sqlalchemy import pool
+from sqlalchemy import make_url, pool
 from sqlalchemy.engine import Connection
 from sqlalchemy.ext.asyncio import create_async_engine
 
@@ -27,8 +27,10 @@ target_metadata = Base.metadata
 def run_migrations_offline() -> None:
     """Run migrations without creating an Engine."""
 
+    # --sql mode never connects, so no credentials: the URL only picks the
+    # dialect.
     context.configure(
-        url=settings.database_url,
+        url=make_url("postgresql+asyncpg://"),
         target_metadata=target_metadata,
         literal_binds=True,
         dialect_opts={"paramstyle": "named"},
@@ -48,8 +50,9 @@ def do_run_migrations(connection: Connection) -> None:
 async def run_async_migrations() -> None:
     """Run migrations using an async SQLAlchemy engine."""
 
+    # Migrations run as the schema owner, not as the limited app user.
     connectable = create_async_engine(
-        settings.database_url,
+        settings.migration_database_url,
         poolclass=pool.NullPool,
     )
 

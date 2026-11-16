@@ -6,7 +6,14 @@ db_session connects as the limited app login, like the running app does.
 import pytest
 from sqlalchemy import text
 from sqlalchemy.exc import DBAPIError
-from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
+
+from app.config import Settings
+from app.db.session import (
+    UnsafeDatabaseRoleError,
+    build_engine,
+    check_app_role_is_limited,
+)
 
 INSERT_AUDIT_ENTRY = text(
     "INSERT INTO audit_entries (action, object_type, result) "
@@ -100,3 +107,45 @@ async def test_future_tables_get_app_rights_by_default(
         )
     )
     assert set(granted) == {"r", "S"}
+
+
+@pytest.mark.parametrize(
+    "statement",
+    [
+        pytest.param(
+            "INSERT INTO audit_entries (id, action, object_type, result) "
+            "OVERRIDING SYSTEM VALUE VALUES (5, 'x', 'incident', 'SUCCESS')",
+            id="own id",
+        ),
+        pytest.param(
+            "INSERT INTO audit_entries (action, object_type, result, occurred_at) "
+            "VALUES ('x', 'incident', 'SUCCESS', '2020-01-01')",
+            id="own time",
+        ),
+    ],
+)
+async def test_app_cannot_fake_audit_order_or_time(
+    db_session: AsyncSession, statement: str
+) -> None:
+    # Column grants: the app may not write id or occurred_at at all, so the
+    # database always sets both.
+    with pytest.raises(DBAPIError, match="permission denied for table audit_entries"):
+        await db_session.execute(text(statement))
+
+
+async def test_startup_check_accepts_the_app_login(migrated_db: Settings) -> None:
+    engine = build_engine(migrated_db)
+    try:
+        await check_app_role_is_limited(engine)
+    finally:
+        await engine.dispose()
+
+
+async def test_startup_check_refuses_the_schema_owner(migrated_db: Settings) -> None:
+    # What happens if DB_USER is set to the owner, under any name.
+    engine = create_async_engine(migrated_db.migration_database_url)
+    try:
+        with pytest.raises(UnsafeDatabaseRoleError, match="superuser or owns"):
+            await check_app_role_is_limited(engine)
+    finally:
+        await engine.dispose()

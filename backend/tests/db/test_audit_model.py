@@ -1,7 +1,7 @@
 import uuid
 
 import pytest
-from sqlalchemy.exc import DBAPIError, IntegrityError
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models import AuditEntry
@@ -93,11 +93,3 @@ async def test_denied_entry_keeps_reason(db_session: AsyncSession) -> None:
 
     assert entry.result is AuditResult.DENIED
     assert entry.reason == "role may not view identification data"
-
-
-async def test_app_cannot_choose_the_id(db_session: AsyncSession) -> None:
-    # GENERATED ALWAYS: only the database assigns ids, so the order of
-    # entries cannot be faked.
-    db_session.add(make_entry(id=1_000_000))
-    with pytest.raises(DBAPIError, match="cannot insert a non-DEFAULT value"):
-        await db_session.flush()

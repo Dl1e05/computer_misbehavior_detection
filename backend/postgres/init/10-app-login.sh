@@ -9,6 +9,15 @@ if [ "$APP_DB_USER" = "$POSTGRES_USER" ]; then
     echo "DB_USER must differ from DB_MIGRATION_USER in .env" >&2
     exit 1
 fi
+if [ "$APP_DB_USER" = "app_runtime" ]; then
+    echo "DB_USER must not be app_runtime: that is the group role" >&2
+    exit 1
+fi
+# A leaked app password must not also open the owner account.
+if [ "$APP_DB_PASSWORD" = "$POSTGRES_PASSWORD" ]; then
+    echo "DB_PASSWORD must differ from DB_MIGRATION_PASSWORD in .env" >&2
+    exit 1
+fi
 
 psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname "$POSTGRES_DB" \
     --set app_user="$APP_DB_USER" --set app_password="$APP_DB_PASSWORD" <<'SQL'

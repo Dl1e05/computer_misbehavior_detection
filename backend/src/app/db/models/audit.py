@@ -29,8 +29,10 @@ class AuditEntry(Base):
         Index("ix_audit_entries_object", "object_type", "object_id"),
     )
 
-    # Increasing numbers: the order is clear and a gap stands out. ALWAYS:
-    # only the database assigns ids; an explicit id from the app is refused.
+    # Increasing numbers show the insert order. Gaps mean nothing: a rolled
+    # back insert also uses up an id. The app has no INSERT right on id or
+    # occurred_at (column grants in the app_runtime migration), so both are
+    # always set by the database.
     id: Mapped[int] = mapped_column(BigInteger, Identity(always=True), primary_key=True)
     # No FK to users: the audit is a historical record and must never block
     # or break because of another table.

@@ -45,30 +45,25 @@ def _test_settings(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
     get_settings.cache_clear()
 
 
-# The limited login the app connects with, like the dev init script creates.
+# The limited login the app connects with.
 APP_DB_USER = "app_test"
-APP_DB_PASSWORD = "app_test"
+APP_DB_PASSWORD = "app_test_password"
+INIT_SCRIPT = Path(__file__).resolve().parents[1] / "postgres/init/10-app-login.sh"
 
 
 @pytest.fixture(scope="session")
 def postgres_container() -> Iterator[PostgresContainer]:
     with PostgresContainer(image="pgvector/pgvector:pg17") as container:
-        exit_code, output = container.exec(
-            [
-                "psql",
-                "-v",
-                "ON_ERROR_STOP=1",
-                "-U",
-                container.username,
-                "-d",
-                container.dbname,
-                "-c",
-                "CREATE ROLE app_runtime NOLOGIN; "
-                f"CREATE ROLE {APP_DB_USER} LOGIN PASSWORD '{APP_DB_PASSWORD}' "
-                "IN ROLE app_runtime;",
-            ]
+        # The same script dev uses (postgres/init), so the two cannot drift.
+        # POSTGRES_USER/DB/PASSWORD are already in the container environment.
+        exit_code, output = container.get_wrapped_container().exec_run(
+            ["sh", "-c", INIT_SCRIPT.read_text()],
+            environment={
+                "APP_DB_USER": APP_DB_USER,
+                "APP_DB_PASSWORD": APP_DB_PASSWORD,
+            },
         )
-        assert exit_code == 0, output
+        assert exit_code == 0, output.decode()
         yield container
 
 

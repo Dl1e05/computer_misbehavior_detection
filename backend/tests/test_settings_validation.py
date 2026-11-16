@@ -1,4 +1,5 @@
 import os
+from typing import Any
 
 import pytest
 from pydantic import ValidationError
@@ -9,20 +10,23 @@ LONG_KEY_A = "a" * 32
 LONG_KEY_B = "b" * 32
 
 
-def make_settings(session_key: str, clip_key: str) -> Settings:
-    return Settings(
-        db_host="localhost",
-        db_port=5432,
-        db_user="app",
-        db_name="testdb",
-        db_password="test",
-        mqtt_host="localhost",
-        mqtt_port=1883,
-        mqtt_username="test",
-        mqtt_password="test",
-        session_signing_key=session_key,
-        clip_link_signing_key=clip_key,
-    )
+def make_settings(
+    session_key: str = LONG_KEY_A, clip_key: str = LONG_KEY_B, **overrides: Any
+) -> Settings:
+    values: dict[str, Any] = {
+        "db_host": "localhost",
+        "db_port": 5432,
+        "db_user": "app",
+        "db_name": "testdb",
+        "db_password": "test",
+        "mqtt_host": "localhost",
+        "mqtt_port": 1883,
+        "mqtt_username": "test",
+        "mqtt_password": "test",
+        "session_signing_key": session_key,
+        "clip_link_signing_key": clip_key,
+    }
+    return Settings(**(values | overrides))
 
 
 def test_valid_signing_keys_are_accepted() -> None:
@@ -58,18 +62,8 @@ def test_shell_leftovers_are_removed_from_environment() -> None:
 def test_app_user_must_not_be_the_schema_owner() -> None:
     # An owner ignores GRANT/REVOKE, so the audit would not be append-only.
     with pytest.raises(ValidationError, match="must not connect as the schema owner"):
-        Settings(
-            db_host="localhost",
-            db_port=5432,
+        make_settings(
             db_user="owner",
-            db_name="testdb",
-            db_password="test",
             db_migration_user="owner",
             db_migration_password="test",
-            mqtt_host="localhost",
-            mqtt_port=1883,
-            mqtt_username="test",
-            mqtt_password="test",
-            session_signing_key=LONG_KEY_A,
-            clip_link_signing_key=LONG_KEY_B,
         )

@@ -44,8 +44,16 @@ def upgrade() -> None:
     )
     op.execute("GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO app_runtime")
 
-    # Append-only audit (BE-FR-75, I8): INSERT and SELECT only.
-    op.execute("REVOKE UPDATE, DELETE ON audit_entries FROM app_runtime")
+    # Append-only audit (BE-FR-75, I8): SELECT, and INSERT only into the
+    # columns the app fills. id and occurred_at are left out, so the database
+    # always fills them: a table-wide INSERT would let the app set them with
+    # OVERRIDING SYSTEM VALUE or an explicit time. A new audit column needs
+    # its own column GRANT in its migration.
+    op.execute("REVOKE INSERT, UPDATE, DELETE ON audit_entries FROM app_runtime")
+    op.execute(
+        "GRANT INSERT (actor_id, actor_role, action, object_type, object_id, "
+        "result, reason, access_context) ON audit_entries TO app_runtime"
+    )
     # Only migrations may change the recorded schema version.
     op.execute("REVOKE ALL ON alembic_version FROM app_runtime")
 
@@ -71,6 +79,10 @@ def downgrade() -> None:
     op.execute(
         "ALTER DEFAULT PRIVILEGES IN SCHEMA public "
         "REVOKE SELECT, INSERT, UPDATE, DELETE ON TABLES FROM app_runtime"
+    )
+    op.execute(
+        "REVOKE INSERT (actor_id, actor_role, action, object_type, object_id, "
+        "result, reason, access_context) ON audit_entries FROM app_runtime"
     )
     op.execute("REVOKE ALL ON ALL SEQUENCES IN SCHEMA public FROM app_runtime")
     op.execute("REVOKE ALL ON ALL TABLES IN SCHEMA public FROM app_runtime")

@@ -34,12 +34,17 @@ class Settings(BaseSettings):
     # Event processing
     event_ack_mode: Literal["after_commit"] = "after_commit"
 
-    # Database connection
+    # Database connection. DB_USER is the limited app login (member of the
+    # app_runtime role); it must not own the schema (BE-FR-75).
     db_host: str
     db_port: int = Field(ge=1, le=65535)
     db_user: str
     db_name: str
     db_password: SecretStr
+    # Schema owner, used only by Alembic (migrations/env.py). Optional: the
+    # running app does not need, and should not get, the owner password.
+    db_migration_user: str | None = None
+    db_migration_password: SecretStr | None = None
 
     # MQTT connection
     mqtt_host: str
@@ -63,12 +68,38 @@ class Settings(BaseSettings):
             )
         return self
 
+    @model_validator(mode="after")
+    def _app_is_not_schema_owner(self) -> Self:
+        # An owner ignores GRANT/REVOKE, so the append-only audit would
+        # silently stop being append-only.
+        if (
+            self.db_migration_user is not None
+            and self.db_user == self.db_migration_user
+        ):
+            raise ValueError(
+                "DB_USER must differ from DB_MIGRATION_USER: the app must not "
+                "connect as the schema owner"
+            )
+        return self
+
     @property
     def database_url(self) -> URL:
+        return self._url(self.db_user, self.db_password)
+
+    @property
+    def migration_database_url(self) -> URL:
+        if self.db_migration_user is None or self.db_migration_password is None:
+            raise RuntimeError(
+                "DB_MIGRATION_USER and DB_MIGRATION_PASSWORD are required "
+                "to run migrations"
+            )
+        return self._url(self.db_migration_user, self.db_migration_password)
+
+    def _url(self, user: str, password: SecretStr) -> URL:
         return URL.create(
             drivername="postgresql+asyncpg",
-            username=self.db_user,
-            password=self.db_password.get_secret_value(),
+            username=user,
+            password=password.get_secret_value(),
             host=self.db_host,
             port=self.db_port,
             database=self.db_name,

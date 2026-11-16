@@ -53,3 +53,23 @@ def test_shell_leftovers_are_removed_from_environment() -> None:
         if not field.is_required() and name.upper() in os.environ
     ]
     assert leftovers == []
+
+
+def test_app_user_must_not_be_the_schema_owner() -> None:
+    # An owner ignores GRANT/REVOKE, so the audit would not be append-only.
+    with pytest.raises(ValidationError, match="must not connect as the schema owner"):
+        Settings(
+            db_host="localhost",
+            db_port=5432,
+            db_user="owner",
+            db_name="testdb",
+            db_password="test",
+            db_migration_user="owner",
+            db_migration_password="test",
+            mqtt_host="localhost",
+            mqtt_port=1883,
+            mqtt_username="test",
+            mqtt_password="test",
+            session_signing_key=LONG_KEY_A,
+            clip_link_signing_key=LONG_KEY_B,
+        )

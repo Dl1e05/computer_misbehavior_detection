@@ -45,9 +45,30 @@ def _test_settings(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
     get_settings.cache_clear()
 
 
+# The limited login the app connects with, like the dev init script creates.
+APP_DB_USER = "app_test"
+APP_DB_PASSWORD = "app_test"
+
+
 @pytest.fixture(scope="session")
 def postgres_container() -> Iterator[PostgresContainer]:
     with PostgresContainer(image="pgvector/pgvector:pg17") as container:
+        exit_code, output = container.exec(
+            [
+                "psql",
+                "-v",
+                "ON_ERROR_STOP=1",
+                "-U",
+                container.username,
+                "-d",
+                container.dbname,
+                "-c",
+                "CREATE ROLE app_runtime NOLOGIN; "
+                f"CREATE ROLE {APP_DB_USER} LOGIN PASSWORD '{APP_DB_PASSWORD}' "
+                "IN ROLE app_runtime;",
+            ]
+        )
+        assert exit_code == 0, output
         yield container
 
 
@@ -57,8 +78,11 @@ def db_settings(
 ) -> Settings:
     monkeypatch.setenv("DB_HOST", postgres_container.get_container_host_ip())
     monkeypatch.setenv("DB_PORT", str(postgres_container.get_exposed_port(5432)))
-    monkeypatch.setenv("DB_USER", postgres_container.username)
-    monkeypatch.setenv("DB_PASSWORD", postgres_container.password)
+    # Tests use the app's limited rights; only migrations use the owner.
+    monkeypatch.setenv("DB_USER", APP_DB_USER)
+    monkeypatch.setenv("DB_PASSWORD", APP_DB_PASSWORD)
+    monkeypatch.setenv("DB_MIGRATION_USER", postgres_container.username)
+    monkeypatch.setenv("DB_MIGRATION_PASSWORD", postgres_container.password)
     monkeypatch.setenv("DB_NAME", postgres_container.dbname)
     get_settings.cache_clear()
     return get_settings()

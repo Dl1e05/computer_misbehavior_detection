@@ -27,6 +27,7 @@ target_metadata = Base.metadata
 def run_migrations_offline() -> None:
     """Run migrations without creating an Engine."""
 
+    # --sql mode never connects; the URL only picks the dialect.
     context.configure(
         url=settings.database_url,
         target_metadata=target_metadata,
@@ -48,8 +49,9 @@ def do_run_migrations(connection: Connection) -> None:
 async def run_async_migrations() -> None:
     """Run migrations using an async SQLAlchemy engine."""
 
+    # Migrations run as the schema owner, not as the limited app user.
     connectable = create_async_engine(
-        settings.database_url,
+        settings.migration_database_url,
         poolclass=pool.NullPool,
     )
 

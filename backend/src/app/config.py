@@ -30,6 +30,9 @@ class Settings(BaseSettings):
     ident_top_k: PositiveInt = 5
     ident_match_threshold: float | None = Field(default=None, ge=0, le=1)
     ident_margin: float | None = Field(default=None, ge=0, le=1)
+    # Length of a face embedding (InsightFace: 512 assumed, to be confirmed
+    # by the ML team).
+    embedding_dim: PositiveInt = 512
 
     # Event processing
     event_ack_mode: Literal["after_commit"] = "after_commit"

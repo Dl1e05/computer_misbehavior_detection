@@ -67,3 +67,10 @@ def test_app_user_must_not_be_the_schema_owner() -> None:
             db_migration_user="owner",
             db_migration_password="test",
         )
+
+
+def test_future_limit_must_not_be_below_skew_warning() -> None:
+    # Skew up to the warning is only a warning (V10); rejecting it (V9)
+    # would contradict that.
+    with pytest.raises(ValidationError, match="EVENT_MAX_FUTURE_SECONDS"):
+        make_settings(clock_skew_warn_seconds=120, event_max_future_seconds=60)

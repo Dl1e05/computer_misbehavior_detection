@@ -24,12 +24,18 @@ class Settings(BaseSettings):
     clip_pre_roll_seconds: int = Field(default=5, ge=0)
     clip_post_roll_seconds: int = Field(default=5, ge=0)
     clock_skew_warn_seconds: int = Field(default=2, ge=0)
+    # V9: an event further in the future than this is rejected; smaller skew
+    # is only a warning (V10). Proposed value, the SRS sets none.
+    event_max_future_seconds: PositiveInt = 60
     signed_link_ttl_seconds: PositiveInt = 60
 
     # Identification
     ident_top_k: PositiveInt = 5
     ident_match_threshold: float | None = Field(default=None, ge=0, le=1)
     ident_margin: float | None = Field(default=None, ge=0, le=1)
+    # Length of a face embedding (InsightFace: 512 assumed, to be confirmed
+    # by the ML team).
+    embedding_dim: PositiveInt = 512
 
     # Event processing
     event_ack_mode: Literal["after_commit"] = "after_commit"
@@ -79,6 +85,16 @@ class Settings(BaseSettings):
             raise ValueError(
                 "DB_USER must differ from DB_MIGRATION_USER: the app must not "
                 "connect as the schema owner"
+            )
+        return self
+
+    @model_validator(mode="after")
+    def _future_limit_above_warning(self) -> Self:
+        # Skew up to the warning threshold is only a warning (V10), so the
+        # rejection threshold (V9) must not be below it.
+        if self.event_max_future_seconds < self.clock_skew_warn_seconds:
+            raise ValueError(
+                "EVENT_MAX_FUTURE_SECONDS must be >= CLOCK_SKEW_WARN_SECONDS"
             )
         return self
 

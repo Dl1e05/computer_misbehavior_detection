@@ -8,7 +8,6 @@ Rule violations are raised as PydanticCustomError whose error type is the
 SRS failure code, so the caller can read the code straight from the error.
 """
 
-import math
 import re
 import uuid
 from dataclasses import dataclass
@@ -47,7 +46,8 @@ _CONTRACT_CONFIG = ConfigDict(
     extra="ignore", strict=True, frozen=True, allow_inf_nan=False
 )
 
-_SCHEMA_VERSION = re.compile(r"^(\d+)\.(\d+)$")
+# ASCII digits only: \d would also match e.g. Arabic-Indic digits.
+_SCHEMA_VERSION = re.compile(r"([0-9]+)\.([0-9]+)")
 
 
 @dataclass(frozen=True)
@@ -60,6 +60,14 @@ class EventLimits:
     embedding_dim: int
     received_at: datetime
     max_future: timedelta
+
+    def __post_init__(self) -> None:
+        # A naive time cannot be compared with occurred_at; failing here
+        # beats crashing later on every valid event.
+        if self.received_at.utcoffset() is None:
+            raise ValueError("received_at must have a timezone")
+        if self.embedding_dim <= 0 or self.max_future < timedelta(0):
+            raise ValueError("embedding_dim must be > 0 and max_future >= 0")
 
 
 def _fail(code: FailureCode, message: str) -> PydanticCustomError:
@@ -113,7 +121,7 @@ class MlEvent(BaseModel):
     @classmethod
     def _supported_schema(cls, value: str) -> str:
         # V3: any minor version of a supported major version.
-        match = _SCHEMA_VERSION.match(value)
+        match = _SCHEMA_VERSION.fullmatch(value)
         if match is None or int(match.group(1)) not in SUPPORTED_SCHEMA_MAJORS:
             raise _fail(FailureCode.UNSUPPORTED_SCHEMA, f"unsupported schema {value!r}")
         return value
@@ -134,8 +142,13 @@ class MlEvent(BaseModel):
             raise _fail(FailureCode.INVALID_TIMESTAMP, "occurred_at must be UTC")
         return value
 
-    # Runs only once every field is valid, which keeps the V order: field
-    # errors first. Checks follow the V numbers; the first failure is raised.
+    # Pydantic runs this only once every field is valid. So if a message has
+    # a field error AND a cross-field fault, only the field error's code is
+    # seen, even when the cross-field rule has the lower V number. Known
+    # deviation from "first failure in V order" (§7.4): every V1..V15
+    # rejection is handled the same way (§7.5), only the reported code can
+    # differ, and it is always a real fault of the message.
+    # Within this validator, checks follow the V numbers.
     @model_validator(mode="after")
     def _cross_field_rules(self, info: ValidationInfo) -> Self:
         limits = _limits(info)
@@ -206,15 +219,13 @@ class MlEvent(BaseModel):
                 FailureCode.BIOMETRIC_NOT_ALLOWED,
                 "embeddings are not allowed on a suspicion",
             )
-        # V15: exactly D numbers, all finite.
+        # V15: exactly D numbers ("all finite" is allow_inf_nan=False).
         for embedding in embeddings:
             if len(embedding) != limits.embedding_dim:
                 raise _fail(
                     FailureCode.INVALID_EMBEDDING,
                     f"embedding must have {limits.embedding_dim} numbers",
                 )
-            if not all(math.isfinite(value) for value in embedding):
-                raise _fail(FailureCode.INVALID_EMBEDDING, "embedding not finite")
 
 
 @dataclass(frozen=True)
@@ -236,7 +247,7 @@ _EVENT_FIELD_CODES: dict[str, FailureCode] = {
     "event_id": FailureCode.INVALID_EVENT_ID,
     "event_type": FailureCode.INVALID_EVENT_TYPE,
     "incident_type": FailureCode.INVALID_INCIDENT_TYPE,
-    # The closest V rule for an unusable value (SRS has no code for them):
+    # The closest V rule for an unusable value (SRS has no code for it):
     "camera_id": FailureCode.UNKNOWN_CAMERA,
     "occurred_at": FailureCode.INVALID_TIMESTAMP,
     "sent_at": FailureCode.INVALID_TIMESTAMP,
@@ -248,8 +259,20 @@ _PARTICIPANT_FIELD_CODES: dict[str, FailureCode] = {
     "embedding": FailureCode.INVALID_EMBEDDING,
     "embedding_model_version": FailureCode.INVALID_EMBEDDING,
 }
-_CHECK_ORDER = list(FailureCode)
+# Rank of each code in V order (FailureCode is declared in that order).
+_RANK = {code: rank for rank, code in enumerate(FailureCode)}
 _FAILURE_CODES = {code.value for code in FailureCode}
+
+
+def _is_required_field(loc: tuple[int | str, ...]) -> bool:
+    # Only these locations are fields; deeper ones are list items.
+    if len(loc) == 1:
+        field = MlEvent.model_fields.get(str(loc[0]))
+    elif len(loc) == 3 and loc[0] == "participants":
+        field = Participant.model_fields.get(str(loc[2]))
+    else:
+        return False
+    return field is not None and field.is_required()
 
 
 def _code_for(error: ErrorDetails) -> FailureCode:
@@ -260,30 +283,38 @@ def _code_for(error: ErrorDetails) -> FailureCode:
     if error["type"] == "json_invalid" or loc == ():
         # Not JSON, not UTF-8, or JSON that is not an object (V1).
         return FailureCode.MALFORMED_JSON
-    if error["type"] == "missing" or ("input" in error and error["input"] is None):
-        # V2: required fields must be present and non-null.
+    if error["type"] == "missing" or (
+        "input" in error and error["input"] is None and _is_required_field(loc)
+    ):
+        # V2: required fields must be present and non-null. A null in an
+        # optional field or inside a list is that field's own error.
         return FailureCode.MISSING_FIELD
     if loc[0] == "participants" and len(loc) >= 3:
         return _PARTICIPANT_FIELD_CODES.get(
             str(loc[2]), FailureCode.INVALID_PARTICIPANTS
         )
-    # Anything else (e.g. model_version too long): a required field that is
-    # present but unusable, closest to V2.
-    return _EVENT_FIELD_CODES.get(str(loc[0]), FailureCode.MISSING_FIELD)
+    # Fields without a code of their own (e.g. model_version too long).
+    return _EVENT_FIELD_CODES.get(str(loc[0]), FailureCode.INVALID_FIELD)
 
 
 def parse_event(raw: bytes, limits: EventLimits) -> MlEvent | Rejection:
-    """Validate one MQTT message: the event, or the first failure by V order.
+    """Validate one MQTT message: the event, or one failure code.
 
     SRS §7.4 applies the checks in order and stops at the first failure;
-    Pydantic reports every error at once, so the earliest code is picked.
-    FailureCode is declared in V order, which makes that a min().
+    Pydantic reports every error at once, so the earliest code is picked
+    (see the note on MlEvent._cross_field_rules for the one exception).
     """
+    # Checked up front: inside the model the check only runs for messages
+    # whose fields are all valid. (A mode="before" model validator would run
+    # always, but it turns JSON input into Python input, and strict mode then
+    # refuses strings for datetime and UUID fields.)
+    if not isinstance(limits, EventLimits):
+        raise TypeError("parse_event needs EventLimits")
     try:
         return MlEvent.model_validate_json(raw, context=limits)
     except ValidationError as error:
         errors = error.errors(include_url=False)
     coded = [(_code_for(item), item) for item in errors]
-    code, first = min(coded, key=lambda pair: _CHECK_ORDER.index(pair[0]))
+    code, first = min(coded, key=lambda pair: _RANK[pair[0]])
     path = ".".join(str(part) for part in first["loc"]) or "message"
     return Rejection(code=code, detail=f"{path}: {first['msg']}")

@@ -92,11 +92,21 @@ def test_null_participant_confidence_counts_as_missing() -> None:
         ({"sent_at": "yesterday"}, FailureCode.INVALID_TIMESTAMP),
         ({"zone_id": 7}, FailureCode.INVALID_ZONE),
         ({"participants": "17"}, FailureCode.INVALID_PARTICIPANTS),
-        ({"model_version": "x" * 129}, FailureCode.MISSING_FIELD),
+        ({"model_version": "x" * 129}, FailureCode.INVALID_FIELD),
+        ({"episode_id": 5}, FailureCode.INVALID_FIELD),
+        # null in an optional field is that field's error, not "missing".
+        ({"participants": None}, FailureCode.INVALID_PARTICIPANTS),
+        ({"zone_id": None, "sent_at": None}, None),
     ],
 )
-def test_field_error_codes(changes: dict[str, Any], expected: FailureCode) -> None:
-    assert code_for(valid_event() | changes) is expected
+def test_field_error_codes(
+    changes: dict[str, Any], expected: FailureCode | None
+) -> None:
+    payload = valid_event() | changes
+    if expected is None:
+        assert isinstance(parse_event(json.dumps(payload).encode(), LIMITS), MlEvent)
+    else:
+        assert code_for(payload) is expected
 
 
 @pytest.mark.parametrize(
@@ -107,6 +117,12 @@ def test_field_error_codes(changes: dict[str, Any], expected: FailureCode) -> No
         ({"track_id": ""}, FailureCode.INVALID_PARTICIPANTS),
         ({"bbox": [1.0, 2.0]}, FailureCode.INVALID_PARTICIPANTS),
         ({"embedding": "abc"}, FailureCode.INVALID_EMBEDDING),
+        # A null inside a list is that list's error, not a missing field.
+        (
+            {"embedding": [1.0, 2.0, None, 4.0], "embedding_model_version": "v1"},
+            FailureCode.INVALID_EMBEDDING,
+        ),
+        ({"bbox": [None, 1.0, 2.0, 3.0]}, FailureCode.INVALID_PARTICIPANTS),
     ],
 )
 def test_participant_error_codes(
@@ -181,3 +197,41 @@ def test_detail_of_malformed_message_has_no_payload() -> None:
     raw = b'{"embedding": [0.123456789, 0.987654321'
     rejection = rejected(raw)
     assert "0.123456789" not in rejection.detail
+
+
+def test_invalid_field_never_hides_a_rule_failure() -> None:
+    # INVALID_FIELD ranks after every V code.
+    payload = valid_event() | {"episode_id": 5, "event_type": "telepathy"}
+    assert code_for(payload) is FailureCode.INVALID_EVENT_TYPE
+
+
+def test_known_deviation_cross_field_rule_next_to_field_error() -> None:
+    # Pydantic runs cross-field rules only when every field is valid, so a
+    # V7 fault next to a V13 field error is reported as V13 (see
+    # MlEvent._cross_field_rules). Pinned here so a change is noticed.
+    payload = valid_event() | {"incident_type": "fight"}
+    payload["participants"][0]["confidence"] = 1.5
+    assert code_for(payload) is FailureCode.INVALID_CONFIDENCE
+
+
+@pytest.mark.parametrize("version", ["1.0\n", "\u0661.0", " 1.0"])
+def test_schema_version_must_be_plain_ascii(version: str) -> None:
+    payload = valid_event() | {"schema_version": version}
+    assert code_for(payload) is FailureCode.UNSUPPORTED_SCHEMA
+
+
+def test_limits_need_an_aware_received_at() -> None:
+    # A naive time would crash later, and only on valid events.
+    with pytest.raises(ValueError, match="timezone"):
+        EventLimits(
+            embedding_dim=DIM,
+            received_at=datetime(2026, 10, 25, 9, 14, 4),
+            max_future=timedelta(seconds=60),
+        )
+
+
+@pytest.mark.parametrize("raw", [b"not json", json.dumps(valid_event()).encode()])
+def test_missing_limits_fail_for_every_message(raw: bytes) -> None:
+    # Also for malformed messages, where the model's own check never runs.
+    with pytest.raises(TypeError, match="EventLimits"):
+        parse_event(raw, None)  # type: ignore[arg-type]

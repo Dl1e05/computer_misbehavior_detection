@@ -28,6 +28,10 @@ class FailureCode(StrEnum):
     INVALID_CONFIDENCE = "INVALID_CONFIDENCE"
     BIOMETRIC_NOT_ALLOWED = "BIOMETRIC_NOT_ALLOWED"
     INVALID_EMBEDDING = "INVALID_EMBEDDING"
+    # Proposed, not in the SRS: an unusable value in a field that has no code
+    # of its own (e.g. model_version too long). Ranked after V1..V15, so it
+    # never hides a real rule failure.
+    INVALID_FIELD = "INVALID_FIELD"
     DUPLICATE_EVENT = "DUPLICATE_EVENT"
     EVENT_ID_CONFLICT = "EVENT_ID_CONFLICT"
     INVALID_TRANSITION = "INVALID_TRANSITION"

@@ -88,6 +88,16 @@ class Settings(BaseSettings):
             )
         return self
 
+    @model_validator(mode="after")
+    def _future_limit_above_warning(self) -> Self:
+        # Skew up to the warning threshold is only a warning (V10), so the
+        # rejection threshold (V9) must not be below it.
+        if self.event_max_future_seconds < self.clock_skew_warn_seconds:
+            raise ValueError(
+                "EVENT_MAX_FUTURE_SECONDS must be >= CLOCK_SKEW_WARN_SECONDS"
+            )
+        return self
+
     @property
     def database_url(self) -> URL:
         return self._url(self.db_user, self.db_password)

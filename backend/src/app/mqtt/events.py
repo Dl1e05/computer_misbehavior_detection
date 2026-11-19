@@ -20,11 +20,12 @@ from pydantic import (
     BaseModel,
     ConfigDict,
     Field,
+    ValidationError,
     ValidationInfo,
     field_validator,
     model_validator,
 )
-from pydantic_core import PydanticCustomError
+from pydantic_core import ErrorDetails, PydanticCustomError
 
 from app.domain.event import (
     INCIDENT_CREATING_EVENT_TYPES,
@@ -214,3 +215,75 @@ class MlEvent(BaseModel):
                 )
             if not all(math.isfinite(value) for value in embedding):
                 raise _fail(FailureCode.INVALID_EMBEDDING, "embedding not finite")
+
+
+@dataclass(frozen=True)
+class Rejection:
+    """Why a message was rejected: one SRS failure code (§7.4, §7.5).
+
+    detail is built from the field path and the error message only, never
+    from the input: the input may be an embedding, and detail goes to logs
+    and dead letters, where biometric data is not allowed (SRS §14).
+    """
+
+    code: FailureCode
+    detail: str
+
+
+# Codes for field errors that are not SRS rule errors of their own.
+_EVENT_FIELD_CODES: dict[str, FailureCode] = {
+    "schema_version": FailureCode.UNSUPPORTED_SCHEMA,
+    "event_id": FailureCode.INVALID_EVENT_ID,
+    "event_type": FailureCode.INVALID_EVENT_TYPE,
+    "incident_type": FailureCode.INVALID_INCIDENT_TYPE,
+    # The closest V rule for an unusable value (SRS has no code for them):
+    "camera_id": FailureCode.UNKNOWN_CAMERA,
+    "occurred_at": FailureCode.INVALID_TIMESTAMP,
+    "sent_at": FailureCode.INVALID_TIMESTAMP,
+    "zone_id": FailureCode.INVALID_ZONE,
+    "participants": FailureCode.INVALID_PARTICIPANTS,
+}
+_PARTICIPANT_FIELD_CODES: dict[str, FailureCode] = {
+    "confidence": FailureCode.INVALID_CONFIDENCE,
+    "embedding": FailureCode.INVALID_EMBEDDING,
+    "embedding_model_version": FailureCode.INVALID_EMBEDDING,
+}
+_CHECK_ORDER = list(FailureCode)
+_FAILURE_CODES = {code.value for code in FailureCode}
+
+
+def _code_for(error: ErrorDetails) -> FailureCode:
+    loc = error["loc"]
+    if error["type"] in _FAILURE_CODES:
+        # Our own rule errors carry the code as their type.
+        return FailureCode(error["type"])
+    if error["type"] == "json_invalid" or loc == ():
+        # Not JSON, not UTF-8, or JSON that is not an object (V1).
+        return FailureCode.MALFORMED_JSON
+    if error["type"] == "missing" or ("input" in error and error["input"] is None):
+        # V2: required fields must be present and non-null.
+        return FailureCode.MISSING_FIELD
+    if loc[0] == "participants" and len(loc) >= 3:
+        return _PARTICIPANT_FIELD_CODES.get(
+            str(loc[2]), FailureCode.INVALID_PARTICIPANTS
+        )
+    # Anything else (e.g. model_version too long): a required field that is
+    # present but unusable, closest to V2.
+    return _EVENT_FIELD_CODES.get(str(loc[0]), FailureCode.MISSING_FIELD)
+
+
+def parse_event(raw: bytes, limits: EventLimits) -> MlEvent | Rejection:
+    """Validate one MQTT message: the event, or the first failure by V order.
+
+    SRS §7.4 applies the checks in order and stops at the first failure;
+    Pydantic reports every error at once, so the earliest code is picked.
+    FailureCode is declared in V order, which makes that a min().
+    """
+    try:
+        return MlEvent.model_validate_json(raw, context=limits)
+    except ValidationError as error:
+        errors = error.errors(include_url=False)
+    coded = [(_code_for(item), item) for item in errors]
+    code, first = min(coded, key=lambda pair: _CHECK_ORDER.index(pair[0]))
+    path = ".".join(str(part) for part in first["loc"]) or "message"
+    return Rejection(code=code, detail=f"{path}: {first['msg']}")

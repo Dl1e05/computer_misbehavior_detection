@@ -24,6 +24,9 @@ class Settings(BaseSettings):
     clip_pre_roll_seconds: int = Field(default=5, ge=0)
     clip_post_roll_seconds: int = Field(default=5, ge=0)
     clock_skew_warn_seconds: int = Field(default=2, ge=0)
+    # V9: an event further in the future than this is rejected; smaller skew
+    # is only a warning (V10). Proposed value, the SRS sets none.
+    event_max_future_seconds: PositiveInt = 60
     signed_link_ttl_seconds: PositiveInt = 60
 
     # Identification

@@ -1,0 +1,5 @@
+cameras:
+  - id: cam-01
+    sourse: data/demo.mp4
+    process_fps: 8
+    rules: {}

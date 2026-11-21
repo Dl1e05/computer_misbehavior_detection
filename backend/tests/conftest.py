@@ -1,5 +1,5 @@
 import uuid
-from collections.abc import AsyncIterator, Iterator
+from collections.abc import AsyncIterator, Awaitable, Callable, Iterator
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -124,31 +124,55 @@ async def db_session(migrated_db: Settings) -> AsyncIterator[AsyncSession]:
 # --import-mode=importlib, test modules cannot import each other.
 
 
-@pytest.fixture
-async def camera_id(db_session: AsyncSession) -> uuid.UUID:
-    camera = Camera(
-        code="cam-01",
-        name="Corridor",
-        source_type=CameraSourceType.RTSP,
-        source_ref="rtsp://media-server/cam-01",
-    )
-    db_session.add(camera)
-    await db_session.flush()
-    return camera.id
+MakeCamera = Callable[[str], Awaitable[Camera]]
+MakeZone = Callable[[uuid.UUID], Awaitable[Zone]]
 
 
 @pytest.fixture
-async def zone_id(db_session: AsyncSession, camera_id: uuid.UUID) -> uuid.UUID:
-    zone = Zone(
-        camera_id=camera_id,
-        name="Server room door",
-        polygon=[[10, 10], [200, 10], [200, 150], [10, 150]],
-        frame_width=1920,
-        frame_height=1080,
-    )
-    db_session.add(zone)
-    await db_session.flush()
-    return zone.id
+def make_camera(db_session: AsyncSession) -> MakeCamera:
+    """Adds a camera with the given code; the one place a test Camera is built."""
+
+    async def make(code: str) -> Camera:
+        camera = Camera(
+            code=code,
+            name=f"Camera {code}",
+            source_type=CameraSourceType.RTSP,
+            source_ref=f"rtsp://media-server/{code}",
+        )
+        db_session.add(camera)
+        await db_session.flush()
+        return camera
+
+    return make
+
+
+@pytest.fixture
+def make_zone(db_session: AsyncSession) -> MakeZone:
+    """Adds an active zone to the camera; the one place a test Zone is built."""
+
+    async def make(camera_id: uuid.UUID) -> Zone:
+        zone = Zone(
+            camera_id=camera_id,
+            name="Server room door",
+            polygon=[[10, 10], [200, 10], [200, 150], [10, 150]],
+            frame_width=1920,
+            frame_height=1080,
+        )
+        db_session.add(zone)
+        await db_session.flush()
+        return zone
+
+    return make
+
+
+@pytest.fixture
+async def camera_id(make_camera: MakeCamera) -> uuid.UUID:
+    return (await make_camera("cam-01")).id
+
+
+@pytest.fixture
+async def zone_id(make_zone: MakeZone, camera_id: uuid.UUID) -> uuid.UUID:
+    return (await make_zone(camera_id)).id
 
 
 @pytest.fixture

@@ -55,8 +55,9 @@ select = [
 strict = true
 plugins = ["pydantic.mypy"]
 files = ["src", "tests"]
-# Name modules by path (tests.conftest, tests.db.conftest), so the two
-# conftest.py files do not clash; "src" keeps app importable as "app".
+# Name modules by path (e.g. tests.services.test_ingest): test directories
+# have no __init__.py, so files with the same name in two of them would
+# otherwise clash. "src" keeps app importable as "app".
 explicit_package_bases = true
 mypy_path = "src"
 

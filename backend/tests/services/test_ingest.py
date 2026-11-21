@@ -1,6 +1,7 @@
 import hashlib
 import json
 import uuid
+from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
@@ -10,7 +11,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models import AuditEntry, Camera, DeadLetter, ProcessedEvent, Zone
 from app.domain.audit import AuditObjectType, AuditResult
-from app.domain.camera import CameraSourceType
 from app.domain.event import FailureCode
 from app.mqtt.events import EventLimits
 from app.services.ingest import IngestOutcome, IngestStatus, ingest_event
@@ -63,29 +63,14 @@ async def only_dead_letter(session: AsyncSession) -> DeadLetter:
     return (await session.scalars(select(DeadLetter))).one()
 
 
-async def add_camera(session: AsyncSession, code: str) -> Camera:
-    camera = Camera(
-        code=code,
-        name=code,
-        source_type=CameraSourceType.RTSP,
-        source_ref=f"rtsp://media-server/{code}",
-    )
-    session.add(camera)
-    await session.flush()
-    return camera
+# The make_camera / make_zone fixtures (tests/conftest.py); test modules cannot
+# import conftest types, so they are spelled out here.
+MakeCamera = Callable[[str], Awaitable[Camera]]
+MakeZone = Callable[[uuid.UUID], Awaitable[Zone]]
 
 
-async def add_zone(session: AsyncSession, camera_id: uuid.UUID) -> Zone:
-    zone = Zone(
-        camera_id=camera_id,
-        name="Door",
-        polygon=[[0, 0], [10, 0], [10, 10]],
-        frame_width=1920,
-        frame_height=1080,
-    )
-    session.add(zone)
-    await session.flush()
-    return zone
+async def only_audit_entry(session: AsyncSession) -> AuditEntry:
+    return (await session.scalars(select(AuditEntry))).one()
 
 
 # Accepted
@@ -264,7 +249,12 @@ async def test_nul_in_camera_id_is_rejected_not_crashing(
     ],
 )
 async def test_unusable_zone_is_rejected(
-    db_session: AsyncSession, camera_id: uuid.UUID, zone_id: uuid.UUID, zone: str
+    db_session: AsyncSession,
+    camera_id: uuid.UUID,
+    zone_id: uuid.UUID,
+    make_camera: MakeCamera,
+    make_zone: MakeZone,
+    zone: str,
 ) -> None:
     if zone == "inactive":
         own = await db_session.get(Zone, zone_id)
@@ -273,19 +263,20 @@ async def test_unusable_zone_is_rejected(
         await db_session.flush()
         zone = str(zone_id)
     elif zone == "other camera":
-        other = await add_camera(db_session, "cam-02")
-        zone = str((await add_zone(db_session, other.id)).id)
+        other = await make_camera("cam-02")
+        zone = str((await make_zone(other.id)).id)
 
     payload = event(incident_type="zone_intrusion", zone_id=zone)
     outcome = await ingest(db_session, encode(payload))
     assert outcome.code is FailureCode.INVALID_ZONE
 
 
+@pytest.mark.usefixtures("camera_id")
 async def test_zone_is_checked_on_any_incident_type(
-    db_session: AsyncSession, camera_id: uuid.UUID
+    db_session: AsyncSession, make_camera: MakeCamera, make_zone: MakeZone
 ) -> None:
-    other = await add_camera(db_session, "cam-02")
-    foreign_zone = await add_zone(db_session, other.id)
+    other = await make_camera("cam-02")
+    foreign_zone = await make_zone(other.id)
 
     outcome = await ingest(db_session, encode(event(zone_id=str(foreign_zone.id))))
     assert outcome.code is FailureCode.INVALID_ZONE
@@ -307,7 +298,7 @@ async def test_embedding_on_suspicion_is_a_privacy_violation(
     participant = dead_letter.raw_payload["participants"][0]
     assert participant["embedding_model_version"] == "insightface-buffalo_l-1.0"
 
-    audit = (await db_session.scalars(select(AuditEntry))).one()
+    audit = await only_audit_entry(db_session)
     assert audit.action == "event.privacy_violation"
     assert audit.result is AuditResult.DENIED
     assert audit.actor_id is None
@@ -339,3 +330,85 @@ async def test_dead_letter_with_nan_is_written(db_session: AsyncSession) -> None
 
     assert outcome.status is IngestStatus.REJECTED
     assert (await only_dead_letter(db_session)).raw_payload is None
+
+
+@pytest.mark.usefixtures("camera_id")
+@pytest.mark.parametrize(
+    ("changes", "expected"),
+    [
+        pytest.param(
+            {"model_version": "x" * 129}, FailureCode.INVALID_FIELD, id="field error"
+        ),
+        pytest.param(
+            {"incident_type": "fall"},
+            FailureCode.INVALID_STAGE_TYPE_PAIR,
+            id="earlier V rule",
+        ),
+    ],
+)
+async def test_privacy_violation_is_audited_whatever_the_reported_code(
+    db_session: AsyncSession, changes: dict[str, Any], expected: FailureCode
+) -> None:
+    # The embedding was sent on a suspicion even if another fault is reported.
+    payload = fight_with_embedding("suspicion") | changes
+    outcome = await ingest(db_session, encode(payload))
+
+    assert outcome.code is expected
+    assert (await only_audit_entry(db_session)).action == "event.privacy_violation"
+
+
+@pytest.mark.usefixtures("camera_id")
+async def test_privacy_violation_keeps_ids_when_payload_is_not_stored(
+    db_session: AsyncSession,
+) -> None:
+    # U+0000 in an ignored field: the dead letter keeps only the hash, but
+    # the audit entry still names the event and camera.
+    payload = fight_with_embedding("suspicion") | {
+        "event_id": EVENT_ID.upper(),
+        "note": "a\x00b",
+    }
+    await ingest(db_session, encode(payload))
+
+    assert (await only_dead_letter(db_session)).raw_payload is None
+    audit = await only_audit_entry(db_session)
+    assert audit.object_id == EVENT_ID  # canonical form
+    assert audit.access_context["camera_id"] == "cam-01"
+
+
+@pytest.mark.usefixtures("camera_id")
+@pytest.mark.parametrize(
+    "camera",
+    [
+        pytest.param("cam\x00", id="U+0000"),
+        pytest.param("cam\ud800", id="lone surrogate"),
+        pytest.param("c" * 200, id="too long"),
+        pytest.param(7, id="not a string"),
+    ],
+)
+async def test_privacy_violation_drops_unstorable_camera_id(
+    db_session: AsyncSession, camera: object
+) -> None:
+    # The audit insert must not fail either, or the message comes back forever.
+    payload = fight_with_embedding("suspicion") | {"camera_id": camera}
+    outcome = await ingest(db_session, encode(payload))
+
+    assert outcome.status is IngestStatus.REJECTED
+    assert (await only_audit_entry(db_session)).access_context["camera_id"] is None
+
+
+@pytest.mark.usefixtures("camera_id")
+async def test_returned_result_is_a_copy(db_session: AsyncSession) -> None:
+    # The JSONB column does not track in-place changes, so changing the
+    # returned dict must not reach the stored row.
+    raw = encode(event())
+    first = await ingest(db_session, raw)
+    assert first.result is not None
+    first.result["incident_id"] = "x"
+
+    second = await ingest(db_session, raw)
+    assert second.result == {"outcome": "accepted"}
+    assert second.result is not None
+    second.result["incident_id"] = "y"
+    stored = await db_session.get(ProcessedEvent, uuid.UUID(EVENT_ID))
+    assert stored is not None
+    assert stored.result == {"outcome": "accepted"}

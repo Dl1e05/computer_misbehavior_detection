@@ -75,7 +75,8 @@ async def ingest_event(
     stored = await session.get(ProcessedEvent, event.event_id)
     if stored is not None:
         if stored.payload_hash == payload_hash:
-            return IngestOutcome(IngestStatus.DUPLICATE, result=stored.result)
+            # A copy: the JSONB column does not track in-place changes.
+            return IngestOutcome(IngestStatus.DUPLICATE, result=dict(stored.result))
         return await reject(
             Rejection(
                 FailureCode.EVENT_ID_CONFLICT,
@@ -122,9 +123,12 @@ async def _zone_is_usable(
 async def _accept(
     session: AsyncSession, event: MlEvent, payload_hash: str
 ) -> IngestOutcome:
-    # 10b adds the incident and its id to the result. If two copies of one
-    # event race, the second INSERT hits the primary key and its transaction
-    # rolls back; unacknowledged, the copy comes back and is a DUPLICATE.
+    # 10b adds the incident and its id to the result. Build the whole result
+    # before adding the row: the JSONB column does not track later in-place
+    # changes, so the caller gets a copy.
+    # If two copies of one event race, the second INSERT hits the primary key
+    # and its transaction rolls back; unacknowledged, the copy comes back and
+    # is a DUPLICATE.
     result: dict[str, Any] = {"outcome": "accepted"}
     session.add(
         ProcessedEvent(
@@ -132,7 +136,7 @@ async def _accept(
         )
     )
     await session.flush()
-    return IngestOutcome(IngestStatus.ACCEPTED, result=result)
+    return IngestOutcome(IngestStatus.ACCEPTED, result=dict(result))
 
 
 async def _reject(
@@ -146,19 +150,22 @@ async def _reject(
 ) -> IngestOutcome:
     # Rejections are not stored in processed_events: a redelivered rejection
     # (lost PUBACK) only adds another dead letter, which is harmless.
-    payload = storable_payload(raw)
+    loaded = load_object(raw)
     session.add(
         DeadLetter(
             received_at=limits.received_at,
             topic=topic,
             failure_code=rejection.code.value,
             payload_hash=payload_hash,
-            raw_payload=payload,
+            raw_payload=storable_payload(loaded),
         )
     )
-    if rejection.code is FailureCode.BIOMETRIC_NOT_ALLOWED:
-        # §7.5: a privacy violation record in the Audit Log.
-        session.add(_privacy_violation(payload, topic))
+    # §7.5: a privacy violation record in the Audit Log. Decided from the
+    # message itself, not from the reported code: with another fault in the
+    # message the code is that fault (V order, or Pydantic skipping the
+    # cross-field rules), but biometric data was still sent.
+    if loaded is not None and _has_embedding_on_suspicion(loaded):
+        session.add(_privacy_violation(loaded, topic))
     await session.flush()
     # detail never contains input values (see Rejection), so it may be logged.
     logger.warning(
@@ -171,28 +178,73 @@ async def _reject(
     return IngestOutcome(IngestStatus.REJECTED, code=rejection.code)
 
 
-def _privacy_violation(payload: dict[str, Any] | None, topic: str) -> AuditEntry:
-    # The message passed every field check, so event_id and camera_id are
-    # valid strings; payload is None only if it could not be stored.
-    payload = payload or {}
-    event_id = payload.get("event_id")
-    camera_id = payload.get("camera_id")
+def _has_embedding_on_suspicion(loaded: dict[str, Any]) -> bool:
+    # The same condition as V14 in MlEvent, read from the unvalidated JSON.
+    participants = loaded.get("participants")
+    return (
+        loaded.get("event_type") == "suspicion"
+        and isinstance(participants, list)
+        and any(
+            isinstance(participant, dict) and participant.get("embedding") is not None
+            for participant in participants
+        )
+    )
+
+
+def _privacy_violation(loaded: dict[str, Any], topic: str) -> AuditEntry:
+    # The message may have failed any check, so its values are untrusted:
+    # each one is kept only if Postgres can store it, or the audit insert
+    # would fail and the message would be redelivered forever.
     return AuditEntry(
         actor_id=None,
         actor_role=None,
         action="event.privacy_violation",
         object_type=AuditObjectType.EVENT,
-        object_id=event_id if isinstance(event_id, str) else None,
+        object_id=_canonical_uuid(loaded.get("event_id")),
         result=AuditResult.DENIED,
         reason=FailureCode.BIOMETRIC_NOT_ALLOWED.value,
         access_context={
             "topic": topic,
-            "camera_id": camera_id if isinstance(camera_id, str) else None,
+            "camera_id": _storable_text(loaded.get("camera_id")),
         },
     )
 
 
-def storable_payload(raw: bytes) -> dict[str, Any] | None:
+def _canonical_uuid(value: object) -> str | None:
+    # Canonical form, so lookups by the event's id find the entry.
+    if not isinstance(value, str):
+        return None
+    try:
+        return str(uuid.UUID(value))
+    except ValueError:
+        return None
+
+
+# A camera code is short; anything longer is not one.
+_MAX_TEXT = 128
+
+
+def _storable_text(value: object) -> str | None:
+    if not isinstance(value, str) or "\x00" in value or len(value) > _MAX_TEXT:
+        return None
+    try:
+        value.encode()
+    except UnicodeEncodeError:  # lone surrogate
+        return None
+    return value
+
+
+def load_object(raw: bytes) -> dict[str, Any] | None:
+    """The message as a JSON object, or None if it is not one."""
+    try:
+        loaded = json.loads(raw, parse_constant=_refuse_constant)
+    except (ValueError, RecursionError):
+        # Not UTF-8, not JSON, literal NaN/Infinity, or nested too deeply.
+        return None
+    return loaded if isinstance(loaded, dict) else None
+
+
+def storable_payload(loaded: dict[str, Any] | None) -> dict[str, Any] | None:
     """The payload as it may be kept in a dead letter, or None.
 
     A dead letter must never fail to save: that would roll back the
@@ -200,17 +252,15 @@ def storable_payload(raw: bytes) -> dict[str, Any] | None:
     Postgres JSONB refuses, or that is too large, becomes None and only the
     payload hash is kept. Embeddings are removed at any depth (SRS §12.6, §14).
     """
+    if loaded is None:
+        return None
     try:
-        loaded = json.loads(raw, parse_constant=_refuse_constant)
-        if not isinstance(loaded, dict):
-            return None
         cleaned: dict[str, Any] = _without_embeddings(loaded)
-        # Lone surrogates (valid in Python's json, refused by JSONB) fail to
-        # encode as UTF-8 (UnicodeEncodeError is a ValueError).
-        encoded = json.dumps(cleaned, ensure_ascii=False).encode()
+        # allow_nan=False: an overflowing number such as 1e400 loads as inf,
+        # which JSONB refuses. Lone surrogates fail to encode as UTF-8.
+        # Both raise a ValueError.
+        encoded = json.dumps(cleaned, ensure_ascii=False, allow_nan=False).encode()
     except (ValueError, RecursionError):
-        # Not UTF-8, not JSON, NaN/Infinity, lone surrogates, or nested too
-        # deeply for any of the three steps.
         return None
     # json.dumps always escapes U+0000, and JSONB refuses that escape. A
     # literal "\\u0000" text also matches; dropping it as well is harmless.

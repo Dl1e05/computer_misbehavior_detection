@@ -143,7 +143,8 @@ class MlEvent(BaseModel):
         # V3: any minor version of a supported major version.
         match = _SCHEMA_VERSION.fullmatch(value)
         if match is None or int(match.group(1)) not in SUPPORTED_SCHEMA_MAJORS:
-            raise _fail(FailureCode.UNSUPPORTED_SCHEMA, f"unsupported schema {value!r}")
+            # No value in the message: it goes to logs (see Rejection).
+            raise _fail(FailureCode.UNSUPPORTED_SCHEMA, "unsupported schema version")
         return value
 
     @field_validator("event_id")

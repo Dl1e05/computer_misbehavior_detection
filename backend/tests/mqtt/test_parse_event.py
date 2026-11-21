@@ -193,6 +193,12 @@ def test_detail_never_contains_input_values() -> None:
     assert str(secret) not in repr(rejection)
 
 
+def test_detail_of_unsupported_schema_has_no_input() -> None:
+    # detail is logged for every rejection; input could flood the log.
+    detail = rejected(json.dumps(valid_event() | {"schema_version": "9" * 50}).encode())
+    assert "999" not in detail.detail
+
+
 def test_detail_of_malformed_message_has_no_payload() -> None:
     raw = b'{"embedding": [0.123456789, 0.987654321'
     rejection = rejected(raw)

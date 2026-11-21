@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from vision.rules.base import RULES, Detection, Participant, Rule, RuleContext, register
-from vision.rules import zone  # noqa: F401  — регистрирует zone_intrusion
+from vision.rules import fall, zone  # noqa: F401  — регистрируют fall, zone_intrusion
 
 
 def build_rules(camera_id: str, rules_cfg: dict | None, zones: dict | None = None) -> list[Rule]:
@@ -30,4 +30,12 @@ def build_rules(camera_id: str, rules_cfg: dict | None, zones: dict | None = Non
     return rules
 
 
-__all__ = ["RULES", "Detection", "Participant", "Rule", "RuleContext", "register", "build_rules"]
+def required_inputs(rules: list[Rule]) -> set[str]:
+    """Что нужно правилам камеры: persons, poses, ... — по этому решаем, гонять ли pose-модель."""
+    out: set[str] = set()
+    for r in rules:
+        out |= set(r.requires)
+    return out
+
+
+__all__ = ["RULES", "Detection", "Participant", "Rule", "RuleContext", "register", "build_rules", "required_inputs"]

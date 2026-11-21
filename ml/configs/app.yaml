@@ -7,6 +7,15 @@ detector:                  # стадия Inference: ОДНА модель на 
   device: 0                # 0 — первая GPU, "cpu" — без видеокарты
   half: true               # FP16 на GPU
 
+pose:                      # только для камер, где правилу нужны poses (fall, fight)
+  mode: separate           # план А: отдельная pose-модель поверх треков детектора; план Б (pose вместо детектора) — позже
+  weights: weights/yolo26n-pose.pt
+  imgsz: 640
+  conf: 0.25
+  device: 0
+  half: true
+  match_iou: 0.5           # скелет привязывается к треку, если IoU рамок не меньше
+
 tracker:                   # стадия Analytics: свой трекер на КАЖДУЮ камеру
   type: bytetrack          # план Б: botsort (пока не подключён)
   track_thresh: 0.5        # уверенность, с которой рамка может начать новый трек

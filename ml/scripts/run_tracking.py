@@ -4,6 +4,7 @@
     python scripts/run_tracking.py --camera cam-01 --camera cam-rtsp
     python scripts/run_tracking.py --source data/demo1.mp4 --copies 4      # 4 «камеры» из одного ролика
     python scripts/run_tracking.py --source data/demo1.mp4 --copies 4 --fast --no-show
+    python scripts/run_tracking.py --source data/adl-01_rgb.avi --rules-from cam-fall  # чужой ролик, правила cam-fall
 
 Окно: сетка камер, рамки с track_id, зоны (красные). q / Esc — выход.
 События правил печатаются в лог (в BE по MQTT их отправит шаг 8).
@@ -29,8 +30,9 @@ sys.path.insert(0, str(ROOT / "src"))
 
 from vision.analytics.tracker import CameraTracker  # noqa: E402
 from vision.analytics.zones import foot_point, load_zones  # noqa: E402
-from vision.rules import RuleContext, build_rules  # noqa: E402
+from vision.rules import RuleContext, build_rules, required_inputs  # noqa: E402
 from vision.inference.detector import BatchDetector  # noqa: E402
+from vision.inference.pose import PoseEstimator, attach_poses  # noqa: E402
 from vision.runtime.bus import FrameBus  # noqa: E402
 from vision.sources.video_source import VideoSource  # noqa: E402
 
@@ -44,7 +46,12 @@ def color(track_id: int) -> tuple[int, int, int]:
     return tuple(int(c) for c in rng.integers(64, 256, 3))
 
 
-def draw(img: np.ndarray, cam_id: str, ts: str, tracks, zones=(), alert_ids=()) -> np.ndarray:
+SKELETON = [(5, 7), (7, 9), (6, 8), (8, 10), (5, 6), (5, 11), (6, 12), (11, 12),
+            (11, 13), (13, 15), (12, 14), (14, 16)]
+
+
+def draw(img: np.ndarray, cam_id: str, ts: str, tracks, zones=(), alert_ids=(),
+         poses=None, phases=None) -> np.ndarray:
     img = img.copy()
     h, w = img.shape[:2]
     for z in zones:
@@ -60,6 +67,14 @@ def draw(img: np.ndarray, cam_id: str, ts: str, tracks, zones=(), alert_ids=()) 
         cv2.rectangle(img, (x1, y1), (x2, y2), c, 2)
         cv2.putText(img, f"id {t.track_id}", (x1, max(y1 - 6, 12)),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.6, c, 2)
+        k = (poses or {}).get(t.track_id)
+        if k is not None:
+            for a, b in SKELETON:
+                if k[a, 2] > 0.5 and k[b, 2] > 0.5:
+                    cv2.line(img, (int(k[a, 0]), int(k[a, 1])), (int(k[b, 0]), int(k[b, 1])), c, 2)
+        phase = (phases or {}).get(t.track_id)
+        if phase and phase != "upright":
+            cv2.putText(img, phase, (x1, y2 + 22), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 255), 2)
         fx, fy = foot_point(t.bbox, w, h)
         cv2.circle(img, (int(fx * w), int(fy * h)), 6, (0, 0, 255) if t.track_id in alert_ids else c, -1)
     cv2.putText(img, f"{cam_id}  {ts}  persons: {len(tracks)}", (10, 30),
@@ -95,6 +110,7 @@ def main() -> None:
     p.add_argument("--camera", action="append", default=[], help="id из cameras.yaml (можно несколько)")
     p.add_argument("--source", help="файл или rtsp:// вместо cameras.yaml")
     p.add_argument("--copies", type=int, default=1, help="сколько виртуальных камер из --source")
+    p.add_argument("--rules-from", help="для --source: взять правила у этой камеры из cameras.yaml")
     p.add_argument("--fps", type=float, default=None, help="process_fps (по умолчанию из конфига / 8)")
     p.add_argument("--fast", action="store_true", help="файлы без ожидания (бенчмарк)")
     p.add_argument("--no-show", action="store_true", help="без окна, только статистика")
@@ -103,7 +119,15 @@ def main() -> None:
 
     app = load_yaml("app.yaml")
     if args.source:
-        cams = [{"id": f"cam-{i + 1:02d}", "source": args.source} for i in range(args.copies)]
+        rules_cfg = {}
+        if args.rules_from:
+            known = {c["id"]: c for c in load_yaml("cameras.yaml").get("cameras", [])}
+            if args.rules_from not in known:
+                p.error(f"нет в cameras.yaml: {args.rules_from}")
+            rules_cfg = {k: v for k, v in (known[args.rules_from].get("rules") or {}).items()
+                         if k != "zone_intrusion"}            # зоны привязаны к своей камере
+        cams = [{"id": f"cam-{i + 1:02d}", "source": args.source, "rules": rules_cfg}
+                for i in range(args.copies)]
     elif args.camera:
         known = {c["id"]: c for c in load_yaml("cameras.yaml").get("cameras", [])}
         missing = [c for c in args.camera if c not in known]
@@ -132,10 +156,21 @@ def main() -> None:
     detector = BatchDetector.from_config(det_cfg)
     detector.warmup(len(cams))
 
+    pose_cams = {cid for cid, rs in rules.items() if "poses" in required_inputs(rs)}
+    pose_model, match_iou = None, 0.5
+    if pose_cams:
+        pose_cfg = dict(app["pose"])
+        pose_cfg.pop("mode", None)
+        match_iou = pose_cfg.pop("match_iou", 0.5)
+        pose_cfg["weights"] = str(ROOT / pose_cfg["weights"])
+        pose_model = PoseEstimator.from_config(pose_cfg)
+        pose_model.warmup(len(pose_cams))
+        logging.info("pose-модель для камер: %s", sorted(pose_cams))
+
     # статистика: track_id -> число кадров, в которых он был
     seen: dict[str, dict[tuple[int, int], int]] = defaultdict(lambda: defaultdict(int))
     n_frames = defaultdict(int)
-    batch_sizes, infer_ms = [], []
+    batch_sizes, infer_ms, pose_ms = [], [], []
     last_tile: dict[str, np.ndarray] = {}
     sessions: dict[str, int] = {}
     alerts: dict[str, dict[int, float]] = defaultdict(dict)   # track_id -> до какого момента подсвечивать
@@ -153,7 +188,16 @@ def main() -> None:
             infer_ms.append((time.perf_counter() - t0) * 1000)
             batch_sizes.append(len(batch))
 
-            for f, d in zip(batch, dets):                       # индекс в батче -> камера -> её трекер
+            # поза — вторым батчем, только кадры камер, которым она нужна
+            need = [i for i, f in enumerate(batch) if f.camera_id in pose_cams]
+            pose_by_idx = {}
+            if need:
+                t0 = time.perf_counter()
+                for i, ps in zip(need, pose_model([batch[i].image for i in need])):
+                    pose_by_idx[i] = ps
+                pose_ms.append((time.perf_counter() - t0) * 1000)
+
+            for idx, (f, d) in enumerate(zip(batch, dets)):                       # индекс в батче -> камера -> её трекер
                 tracks = trackers[f.camera_id].update(d, f.image, session=f.session)
                 n_frames[f.camera_id] += 1
                 for t in tracks:
@@ -165,7 +209,8 @@ def main() -> None:
                         r.reset()                               # после переподключения старые id недействительны
                 sessions[f.camera_id] = f.session
                 h, w = f.image.shape[:2]
-                ctx = RuleContext(f.camera_id, f.ts, w, h, tracks, session=f.session)
+                poses = attach_poses(tracks, pose_by_idx[idx], match_iou) if idx in pose_by_idx else None
+                ctx = RuleContext(f.camera_id, f.ts, w, h, tracks, session=f.session, poses=poses)
                 for r in cam_rules:
                     for d in r.update(ctx):
                         n_events[f.camera_id] += 1
@@ -177,7 +222,12 @@ def main() -> None:
                     now = time.monotonic()
                     hot = {tid for tid, until in alerts[f.camera_id].items() if until > now}
                     cam_zones = [z for r in cam_rules for z in getattr(r, "zones", {}).values()]
-                    last_tile[f.camera_id] = draw(f.image, f.camera_id, f.ts_iso, tracks, cam_zones, hot)
+                    phases = {}
+                    for r in cam_rules:
+                        if hasattr(r, "phase_of"):
+                            phases.update({t.track_id: r.phase_of(t.track_id) for t in tracks})
+                    last_tile[f.camera_id] = draw(f.image, f.camera_id, f.ts_iso, tracks, cam_zones, hot,
+                                                  poses, phases)
 
             if not args.no_show and last_tile:
                 cv2.imshow("tracking", grid([last_tile[c["id"]] for c in cams if c["id"] in last_tile]))
@@ -194,7 +244,8 @@ def main() -> None:
     print("\n=== итог ===")
     if infer_ms:
         print(f"кадров всего: {total} за {wall:.1f} с ({total / wall:.1f} кадр/с), "
-              f"средний батч {np.mean(batch_sizes):.2f}, YOLO на батч {np.mean(infer_ms):.1f} мс")
+              f"средний батч {np.mean(batch_sizes):.2f}, YOLO на батч {np.mean(infer_ms):.1f} мс"
+              + (f", поза на батч {np.mean(pose_ms):.1f} мс" if pose_ms else ""))
     for cam in cams:
         cid = cam["id"]
         lens = sorted(seen[cid].values(), reverse=True)

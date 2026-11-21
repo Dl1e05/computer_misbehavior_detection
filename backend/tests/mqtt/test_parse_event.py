@@ -193,6 +193,12 @@ def test_detail_never_contains_input_values() -> None:
     assert str(secret) not in repr(rejection)
 
 
+def test_detail_of_unsupported_schema_has_no_input() -> None:
+    # detail is logged for every rejection; input could flood the log.
+    detail = rejected(json.dumps(valid_event() | {"schema_version": "9" * 50}).encode())
+    assert "999" not in detail.detail
+
+
 def test_detail_of_malformed_message_has_no_payload() -> None:
     raw = b'{"embedding": [0.123456789, 0.987654321'
     rejection = rejected(raw)
@@ -212,6 +218,25 @@ def test_known_deviation_cross_field_rule_next_to_field_error() -> None:
     payload = valid_event() | {"incident_type": "fight"}
     payload["participants"][0]["confidence"] = 1.5
     assert code_for(payload) is FailureCode.INVALID_CONFIDENCE
+
+
+@pytest.mark.parametrize(
+    ("field", "expected"),
+    [
+        ("camera_id", FailureCode.UNKNOWN_CAMERA),
+        ("model_version", FailureCode.INVALID_FIELD),
+        ("zone_id", FailureCode.INVALID_ZONE),
+    ],
+)
+def test_nul_in_text_is_rejected(field: str, expected: FailureCode) -> None:
+    # Postgres cannot store U+0000; saving it would fail on every redelivery.
+    assert code_for(valid_event() | {field: "a\x00b"}) is expected
+
+
+def test_nul_in_participant_text_is_rejected() -> None:
+    payload = valid_event()
+    payload["participants"][0]["track_id"] = "17\x00"
+    assert code_for(payload) is FailureCode.INVALID_PARTICIPANTS
 
 
 @pytest.mark.parametrize("version", ["1.0\n", "\u0661.0", " 1.0"])

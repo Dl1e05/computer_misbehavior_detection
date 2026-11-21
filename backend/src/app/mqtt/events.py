@@ -2,7 +2,8 @@
 
 These models check what a message can be checked against on its own.
 Checks that need the database (V8 camera, V11 zone ownership, V14 repeat
-events, V16 idempotency, V17 transition) belong to event processing.
+events, V16 idempotency, V17 transition) belong to event processing
+(app.services.ingest).
 
 Rule violations are raised as PydanticCustomError whose error type is the
 SRS failure code, so the caller can read the code straight from the error.
@@ -74,6 +75,15 @@ def _fail(code: FailureCode, message: str) -> PydanticCustomError:
     return PydanticCustomError(code.value, message)
 
 
+def _without_nul(value: object) -> object:
+    # Postgres text and jsonb cannot store U+0000. A value that fails to save
+    # would roll back the transaction, so the message would never be
+    # acknowledged and would come back forever. Rejecting it here ends that.
+    if isinstance(value, str) and "\x00" in value:
+        raise ValueError("text must not contain U+0000")
+    return value
+
+
 def _limits(info: ValidationInfo) -> EventLimits:
     # Missing limits are a programming error, not a bad message: TypeError
     # is not turned into a validation error, so it is not silently skipped.
@@ -97,6 +107,11 @@ class Participant(BaseModel):
     embedding: list[float] | None = None
     embedding_model_version: str | None = None
 
+    @field_validator("*")
+    @classmethod
+    def _no_nul(cls, value: object) -> object:
+        return _without_nul(value)
+
 
 class MlEvent(BaseModel):
     model_config = _CONTRACT_CONFIG
@@ -117,13 +132,19 @@ class MlEvent(BaseModel):
     # Links a fight suspicion to its confirmation (proposed by the ML team).
     episode_id: str | None = None
 
+    @field_validator("*")
+    @classmethod
+    def _no_nul(cls, value: object) -> object:
+        return _without_nul(value)
+
     @field_validator("schema_version")
     @classmethod
     def _supported_schema(cls, value: str) -> str:
         # V3: any minor version of a supported major version.
         match = _SCHEMA_VERSION.fullmatch(value)
         if match is None or int(match.group(1)) not in SUPPORTED_SCHEMA_MAJORS:
-            raise _fail(FailureCode.UNSUPPORTED_SCHEMA, f"unsupported schema {value!r}")
+            # No value in the message: it goes to logs (see Rejection).
+            raise _fail(FailureCode.UNSUPPORTED_SCHEMA, "unsupported schema version")
         return value
 
     @field_validator("event_id")

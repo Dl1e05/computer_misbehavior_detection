@@ -1,4 +1,6 @@
-from collections.abc import AsyncIterator, Iterator
+import uuid
+from collections.abc import AsyncIterator, Awaitable, Callable, Iterator
+from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
@@ -8,7 +10,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from testcontainers.community.postgres import PostgresContainer
 
 from app.config import Settings, get_settings
+from app.db.models import Camera, Incident, Zone
 from app.db.session import build_engine
+from app.domain.camera import CameraSourceType
+from app.domain.incident import IncidentStatus, IncidentType, Severity
 
 REQUIRED_TEST_ENV = {
     "DB_HOST": "localhost",
@@ -113,3 +118,73 @@ async def db_session(migrated_db: Settings) -> AsyncIterator[AsyncSession]:
             await session.close()
             await transaction.rollback()
     await engine.dispose()
+
+
+# Parent rows that many DB tests need. Fixtures, not importable helpers: with
+# --import-mode=importlib, test modules cannot import each other.
+
+
+MakeCamera = Callable[[str], Awaitable[Camera]]
+MakeZone = Callable[[uuid.UUID], Awaitable[Zone]]
+
+
+@pytest.fixture
+def make_camera(db_session: AsyncSession) -> MakeCamera:
+    """Adds a camera with the given code; the one place a test Camera is built."""
+
+    async def make(code: str) -> Camera:
+        camera = Camera(
+            code=code,
+            name=f"Camera {code}",
+            source_type=CameraSourceType.RTSP,
+            source_ref=f"rtsp://media-server/{code}",
+        )
+        db_session.add(camera)
+        await db_session.flush()
+        return camera
+
+    return make
+
+
+@pytest.fixture
+def make_zone(db_session: AsyncSession) -> MakeZone:
+    """Adds an active zone to the camera; the one place a test Zone is built."""
+
+    async def make(camera_id: uuid.UUID) -> Zone:
+        zone = Zone(
+            camera_id=camera_id,
+            name="Server room door",
+            polygon=[[10, 10], [200, 10], [200, 150], [10, 150]],
+            frame_width=1920,
+            frame_height=1080,
+        )
+        db_session.add(zone)
+        await db_session.flush()
+        return zone
+
+    return make
+
+
+@pytest.fixture
+async def camera_id(make_camera: MakeCamera) -> uuid.UUID:
+    return (await make_camera("cam-01")).id
+
+
+@pytest.fixture
+async def zone_id(make_zone: MakeZone, camera_id: uuid.UUID) -> uuid.UUID:
+    return (await make_zone(camera_id)).id
+
+
+@pytest.fixture
+async def incident_id(db_session: AsyncSession, camera_id: uuid.UUID) -> uuid.UUID:
+    incident = Incident(
+        incident_type=IncidentType.FIGHT,
+        severity=Severity.CRITICAL,
+        status=IncidentStatus.SUSPECTED,
+        camera_id=camera_id,
+        occurred_at=datetime(2026, 1, 1, tzinfo=UTC),
+        created_received_at=datetime(2026, 1, 1, 0, 0, 1, tzinfo=UTC),
+    )
+    db_session.add(incident)
+    await db_session.flush()
+    return incident.id

@@ -1,3 +1,4 @@
+import time
 from datetime import timedelta
 
 import cv2
@@ -59,3 +60,43 @@ def test_is_live():
     assert is_live("rtsp://10.0.0.1/s")
     assert is_live("0")
     assert not is_live("data/demo.mp4")
+
+
+class FakeCap:
+    """Имитация RTSP: отдаёт n кадров, потом read() -> False (обрыв)."""
+
+    def __init__(self, n):
+        self.n = n
+
+    def read(self):
+        if self.n <= 0:
+            return False, None
+        self.n -= 1
+        time.sleep(0.005)                 # камера отдаёт кадры не мгновенно
+        return True, np.zeros((4, 4, 3), dtype=np.uint8)
+
+    def release(self):
+        pass
+
+
+def test_live_reconnect_offline_online(monkeypatch):
+    # 1-е подключение: 3 кадра и обрыв; 2-е: камера недоступна; 3-е: снова кадры
+    caps = iter([FakeCap(3), None, FakeCap(10_000)])
+    monkeypatch.setattr(VideoSource, "_open", lambda self: next(caps, None))
+
+    statuses = []
+    src = VideoSource("cam-01", "rtsp://localhost:8554/cam1", process_fps=1000,
+                      fail_threshold=2, min_backoff_s=0.01,
+                      on_status=lambda cam, s: statuses.append(s))
+    frames = []
+    deadline = time.monotonic() + 10
+    for f in src:
+        frames.append(f)
+        if (f.session == 2 and f.index >= 2) or time.monotonic() > deadline:
+            break
+
+    assert statuses[:3] == [ONLINE, OFFLINE, ONLINE]
+    assert {f.session for f in frames} == {1, 2}
+    second = [f for f in frames if f.session == 2]
+    assert second[0].index == 0          # новая сессия -> счёт заново, трекер сбросить
+    assert all(f.ts.tzinfo is not None for f in frames)

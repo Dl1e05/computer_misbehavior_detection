@@ -61,7 +61,9 @@ class VideoSource:
         realtime: bool = True,
         loop: bool = False,
         fail_threshold: int = 25,
+        min_backoff_s: float = 1.0,
         max_backoff_s: float = 30.0,
+        timeout_ms: int = 5000,
         on_status: Callable[[str, str], None] | None = None,
     ):
         self.camera_id = camera_id
@@ -70,7 +72,9 @@ class VideoSource:
         self.realtime = realtime
         self.loop = loop
         self.fail_threshold = fail_threshold
+        self.min_backoff_s = min_backoff_s
         self.max_backoff_s = max_backoff_s
+        self.timeout_ms = timeout_ms   # открыть / прочитать кадр, иначе read() висит ~30 с
         self.on_status = on_status
         self.live = is_live(self.source)
 
@@ -97,7 +101,15 @@ class VideoSource:
 
     def _open(self) -> cv2.VideoCapture | None:
         src = int(self.source) if self.source.isdigit() else self.source
-        cap = cv2.VideoCapture(src, cv2.CAP_FFMPEG) if isinstance(src, str) else cv2.VideoCapture(src)
+        if isinstance(src, int):
+            cap = cv2.VideoCapture(src)
+        elif self.live:
+            cap = cv2.VideoCapture(src, cv2.CAP_FFMPEG, [
+                cv2.CAP_PROP_OPEN_TIMEOUT_MSEC, self.timeout_ms,
+                cv2.CAP_PROP_READ_TIMEOUT_MSEC, self.timeout_ms,
+            ])
+        else:
+            cap = cv2.VideoCapture(src, cv2.CAP_FFMPEG)
         if not cap.isOpened():
             cap.release()
             return None
@@ -159,7 +171,7 @@ class VideoSource:
     # ---------- RTSP / камера ----------
 
     def _reader_loop(self) -> None:
-        backoff = 1.0
+        backoff = self.min_backoff_s
         while not self._stop.is_set():
             cap = self._open()
             if cap is None:
@@ -183,7 +195,7 @@ class VideoSource:
                 fails = 0
                 if first:
                     first = False
-                    backoff = 1.0
+                    backoff = self.min_backoff_s
                     with self._lock:
                         self.session += 1
                         self._latest = None

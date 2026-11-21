@@ -1,0 +1,11 @@
+{
+  "zones": [
+    {
+      "zone_id": "zone-1",
+      "camera_id": "cam-01",
+      "polygon": [[0.35, 0.72], [0.65, 0.72], [0.65, 1.0], [0.35, 1.0]],
+      "version": 1,
+      "active": true
+    }
+  ]
+}

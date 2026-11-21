@@ -4,7 +4,12 @@ cameras:
     process_fps: 8
     realtime: true    # файл в реальном темпе (демо); false — без ожидания (бенчмарк)
     loop: true
-    rules: {}
+    rules:
+      zone_intrusion:
+        zones: [zone-1]           # id из configs/zones.json (рисуются scripts/draw_zone.py)
+        min_inside_s: 0.5         # сколько секунд подряд внутри, чтобы засчитать вход
+        min_outside_s: 1.0        # сколько снаружи, чтобы следующий вход дал новое событие
+        spawn_inside_counts: true # появился сразу внутри — тоже вход
   - id: cam-rtsp
     source: rtsp://localhost:8554/cam1   # локальный MediaMTX; для реальной камеры — ${CAM01_USER}:${CAM01_PASS} из .env
     process_fps: 8

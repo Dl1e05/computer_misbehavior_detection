@@ -12,6 +12,24 @@ cameras:
         spawn_inside_counts: true # появился сразу внутри — тоже вход
       fall:                       # на толпе проверяем, что ложных падений нет
         still_s: 3.0              # сколько секунд лежит неподвижно после падения
+      fight:                      # на толпе проверяем, что ложных драк нет
+        scorer: heuristic         # потом: skeleton / video_model (Фаза 3.2) — меняется только эта строка
+        window_s: 2.0             # окно, за которое считается score
+        suspect_thr: 0.5          # score >= — событие suspicion
+        confirm_thr: 0.7          # score >= ...
+        confirm_s: 1.0            # ... столько секунд подряд — событие confirmation (тот же episode_id)
+        end_s: 3.0                # спокойно дольше — эпизод закрыт
+        close_k: 1.0              # «рядом» = рамки пересекаются или центры ближе роста
+        scorer_params:
+          arm_speed: 1.5          # скорость рук (ростов/с), которая считается резкой
+          turn_speed: 0.8         # или средняя скорость ...
+          turn_deg: 90            # ... с разворотом направления (замах -> удар)
+  - id: cam-fight
+    source: data/fight1.mp4       # ролик с дракой — положить в data/
+    process_fps: 8
+    realtime: true
+    rules:
+      fight: {}
   - id: cam-fall
     source: data/fall1_rgb.avi    # UR Fall fall-01, правая (RGB) половина + 4 с последнего кадра
     process_fps: 8

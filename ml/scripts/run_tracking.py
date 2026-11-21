@@ -73,7 +73,7 @@ def draw(img: np.ndarray, cam_id: str, ts: str, tracks, zones=(), alert_ids=(),
                 if k[a, 2] > 0.5 and k[b, 2] > 0.5:
                     cv2.line(img, (int(k[a, 0]), int(k[a, 1])), (int(k[b, 0]), int(k[b, 1])), c, 2)
         phase = (phases or {}).get(t.track_id)
-        if phase and phase != "upright":
+        if phase and phase not in ("upright",):
             cv2.putText(img, phase, (x1, y2 + 22), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 255), 2)
         fx, fy = foot_point(t.bbox, w, h)
         cv2.circle(img, (int(fx * w), int(fy * h)), 6, (0, 0, 255) if t.track_id in alert_ids else c, -1)
@@ -99,6 +99,7 @@ def log_event(d) -> None:
         "incident_type": d.incident_type, "event_type": d.event_type, "camera_id": d.camera_id,
         "occurred_at": d.occurred_at.isoformat(timespec="milliseconds"),
         "confidence": d.confidence, "zone_id": d.zone_id, "zone_version": d.zone_version,
+        "episode_id": d.episode_id,
         "participants": [{"track_id": p.track_id, "bbox": [round(v, 3) for v in p.bbox],
                           "confidence": p.confidence} for p in d.participants],
     }
@@ -210,7 +211,8 @@ def main() -> None:
                 sessions[f.camera_id] = f.session
                 h, w = f.image.shape[:2]
                 poses = attach_poses(tracks, pose_by_idx[idx], match_iou) if idx in pose_by_idx else None
-                ctx = RuleContext(f.camera_id, f.ts, w, h, tracks, session=f.session, poses=poses)
+                ctx = RuleContext(f.camera_id, f.ts, w, h, tracks, session=f.session, poses=poses,
+                                  image=f.image)
                 for r in cam_rules:
                     for d in r.update(ctx):
                         n_events[f.camera_id] += 1

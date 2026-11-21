@@ -52,8 +52,9 @@ class RuleContext:
     frame_h: int
     tracks: list                               # list[analytics.tracker.Track], bbox в пикселях
     session: int = 0
-    poses: Any = None
+    poses: Any = None                          # {track_id: (17, 3)} — если правилу нужны poses
     objects: Any = None
+    image: Any = None                          # BGR-кадр — для правил/моделей, которым нужна картинка
 
     def norm_bbox(self, bbox) -> tuple[float, float, float, float]:
         x1, y1, x2, y2 = bbox

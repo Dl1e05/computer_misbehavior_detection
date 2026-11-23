@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from vision.rules.base import RULES, Detection, Participant, Rule, RuleContext, register
-from vision.rules import fall, fight, zone  # noqa: F401  — регистрируют fall, fight, zone_intrusion
+from vision.rules import fall, fight, fire, zone  # noqa: F401  — регистрируют все правила
 
 
 def build_rules(camera_id: str, rules_cfg: dict | None, zones: dict | None = None) -> list[Rule]:

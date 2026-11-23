@@ -42,6 +42,7 @@ class Detection:
     zone_id: str | None = None
     zone_version: int | None = None
     episode_id: str | None = None
+    bbox: tuple[float, float, float, float] | None = None   # доли 0–1; для fire — рамка очага
 
 
 @dataclass
@@ -55,6 +56,8 @@ class RuleContext:
     poses: Any = None                          # {track_id: (17, 3)} — если правилу нужны poses
     objects: Any = None
     image: Any = None                          # BGR-кадр — для правил/моделей, которым нужна картинка
+    fire: Any = None                           # (N, 6) рамки модели огня; None — на этом кадре не запускалась
+    fire_names: Any = None                     # {cls: "fire"/"smoke"} — имена классов модели огня
 
     def norm_bbox(self, bbox) -> tuple[float, float, float, float]:
         x1, y1, x2, y2 = bbox

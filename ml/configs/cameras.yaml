@@ -24,6 +24,27 @@ cameras:
           arm_speed: 1.5          # скорость рук (ростов/с), которая считается резкой
           turn_speed: 0.8         # или средняя скорость ...
           turn_deg: 90            # ... с разворотом направления (замах -> удар)
+      fire: {}                    # без весов выключится — проверка статуса узла
+  - id: cam-fire
+    source: data/fire1.mp4        # D-Fire Videos/VP1 (с огнём)
+    process_fps: 8
+    realtime: true
+    rules:
+      fire:
+        window_runs: 5            # смотрим последние N прогонов модели огня
+        min_hits: 4               # ... пламя должно быть хотя бы в M из них в одном месте
+        clear_s: 10               # огня нет столько секунд — следующий очаг даст новое событие
+        classes: [fire]           # добавить smoke, если нужно реагировать на дым
+        min_conf: 0.25
+        flicker: false            # фильтр бликов (лампы, экраны) — включать по результатам тестов
+        flicker_min: 0.05
+  - id: cam-nofire
+    source: data/nofire1.mp4      # D-Fire Videos/FP1: без огня, но похоже — ложных событий быть не должно
+    process_fps: 8
+    realtime: true
+    loop: true
+    rules:
+      fire: {}
   - id: cam-fight
     source: data/fight1.mp4       # ролик с дракой — положить в data/
     process_fps: 8

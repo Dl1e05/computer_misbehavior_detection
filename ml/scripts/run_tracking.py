@@ -32,7 +32,9 @@ from vision.analytics.tracker import CameraTracker  # noqa: E402
 from vision.analytics.zones import foot_point, load_zones  # noqa: E402
 from vision.rules import RuleContext, build_rules, required_inputs  # noqa: E402
 from vision.inference.detector import BatchDetector  # noqa: E402
+from vision.inference.fire import FireDetector  # noqa: E402
 from vision.inference.pose import PoseEstimator, attach_poses  # noqa: E402
+from vision.runtime.status import NodeStatus  # noqa: E402
 from vision.runtime.bus import FrameBus  # noqa: E402
 from vision.sources.video_source import VideoSource  # noqa: E402
 
@@ -99,7 +101,7 @@ def log_event(d) -> None:
         "incident_type": d.incident_type, "event_type": d.event_type, "camera_id": d.camera_id,
         "occurred_at": d.occurred_at.isoformat(timespec="milliseconds"),
         "confidence": d.confidence, "zone_id": d.zone_id, "zone_version": d.zone_version,
-        "episode_id": d.episode_id,
+        "episode_id": d.episode_id, "bbox": list(d.bbox) if d.bbox else None,
         "participants": [{"track_id": p.track_id, "bbox": [round(v, 3) for v in p.bbox],
                           "confidence": p.confidence} for p in d.participants],
     }
@@ -139,6 +141,7 @@ def main() -> None:
         p.error("укажи --camera или --source")
 
     zones = load_zones(ROOT / "configs" / "zones.json")
+    status = NodeStatus()
     sources, trackers, rules = [], {}, {}
     for cam in cams:
         fps = args.fps or cam.get("process_fps", 8)
@@ -147,15 +150,38 @@ def main() -> None:
             src_path = str(ROOT / src_path)
         sources.append(VideoSource(cam["id"], src_path, process_fps=fps,
                                    realtime=not args.fast and cam.get("realtime", True),
-                                   loop=cam.get("loop", False) and not args.fast))
+                                   loop=cam.get("loop", False) and not args.fast,
+                                   on_status=status.set_camera))
+        status.set_camera(cam["id"], "offline")
         trackers[cam["id"]] = CameraTracker.from_config(cam["id"], fps, app["tracker"])
         rules[cam["id"]] = build_rules(cam["id"], cam.get("rules"), zones)
+        for r in rules[cam["id"]]:
+            status.set_rule(cam["id"], r.incident_type, "on")
         logging.info("camera %s: правила %s", cam["id"], [type(r).__name__ for r in rules[cam["id"]]])
 
     det_cfg = dict(app["detector"])
     det_cfg["weights"] = str(ROOT / det_cfg["weights"])
     detector = BatchDetector.from_config(det_cfg)
     detector.warmup(len(cams))
+
+    # огонь: модель только для камер с правилом fire; нет весов — правило выключено, модуль работает
+    fire_cams = {cid for cid, rs in rules.items() if "fire" in required_inputs(rs)}
+    fire_model, fire_period = None, 1.0
+    if fire_cams:
+        fire_cfg = dict(app["fire"])
+        fire_period = 1.0 / float(fire_cfg.pop("run_hz", 3))
+        fire_cfg["weights"] = str(ROOT / fire_cfg["weights"])
+        fire_model = FireDetector.from_config(fire_cfg)
+        if fire_model.available:
+            fire_model.warmup(len(fire_cams))
+            logging.info("модель огня для камер: %s", sorted(fire_cams))
+        else:
+            for cid in fire_cams:
+                rules[cid] = [r for r in rules[cid] if "fire" not in r.requires]
+                status.set_rule(cid, "fire", f"off: {fire_model.reason}")
+            logging.warning("правило fire выключено на %s: %s", sorted(fire_cams), fire_model.reason)
+            fire_cams = set()
+    last_fire_run: dict[str, object] = {}
 
     pose_cams = {cid for cid, rs in rules.items() if "poses" in required_inputs(rs)}
     pose_model, match_iou = None, 0.5
@@ -171,7 +197,8 @@ def main() -> None:
     # статистика: track_id -> число кадров, в которых он был
     seen: dict[str, dict[tuple[int, int], int]] = defaultdict(lambda: defaultdict(int))
     n_frames = defaultdict(int)
-    batch_sizes, infer_ms, pose_ms = [], [], []
+    batch_sizes, infer_ms, pose_ms, fire_ms = [], [], [], []
+    logging.info("статус узла:\n%s", status.describe())
     last_tile: dict[str, np.ndarray] = {}
     sessions: dict[str, int] = {}
     alerts: dict[str, dict[int, float]] = defaultdict(dict)   # track_id -> до какого момента подсвечивать
@@ -198,6 +225,18 @@ def main() -> None:
                     pose_by_idx[i] = ps
                 pose_ms.append((time.perf_counter() - t0) * 1000)
 
+            # огонь — третьим батчем, только камеры, где подошло время (run_hz)
+            due = [i for i, f in enumerate(batch) if f.camera_id in fire_cams and (
+                f.camera_id not in last_fire_run
+                or (f.ts - last_fire_run[f.camera_id]).total_seconds() >= fire_period)]
+            fire_by_idx = {}
+            if due:
+                t0 = time.perf_counter()
+                for i, boxes in zip(due, fire_model([batch[i].image for i in due])):
+                    fire_by_idx[i] = boxes
+                    last_fire_run[batch[i].camera_id] = batch[i].ts
+                fire_ms.append((time.perf_counter() - t0) * 1000)
+
             for idx, (f, d) in enumerate(zip(batch, dets)):                       # индекс в батче -> камера -> её трекер
                 tracks = trackers[f.camera_id].update(d, f.image, session=f.session)
                 n_frames[f.camera_id] += 1
@@ -212,7 +251,8 @@ def main() -> None:
                 h, w = f.image.shape[:2]
                 poses = attach_poses(tracks, pose_by_idx[idx], match_iou) if idx in pose_by_idx else None
                 ctx = RuleContext(f.camera_id, f.ts, w, h, tracks, session=f.session, poses=poses,
-                                  image=f.image)
+                                  image=f.image, fire=fire_by_idx.get(idx),
+                                  fire_names=fire_model.names if fire_model else None)
                 for r in cam_rules:
                     for d in r.update(ctx):
                         n_events[f.camera_id] += 1
@@ -247,7 +287,9 @@ def main() -> None:
     if infer_ms:
         print(f"кадров всего: {total} за {wall:.1f} с ({total / wall:.1f} кадр/с), "
               f"средний батч {np.mean(batch_sizes):.2f}, YOLO на батч {np.mean(infer_ms):.1f} мс"
-              + (f", поза на батч {np.mean(pose_ms):.1f} мс" if pose_ms else ""))
+              + (f", поза на батч {np.mean(pose_ms):.1f} мс" if pose_ms else "")
+              + (f", огонь на батч {np.mean(fire_ms):.1f} мс" if fire_ms else ""))
+    print("статус узла:\n" + status.describe())
     for cam in cams:
         cid = cam["id"]
         lens = sorted(seen[cid].values(), reverse=True)

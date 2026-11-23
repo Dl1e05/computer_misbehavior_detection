@@ -18,6 +18,7 @@ import json
 import logging
 import sys
 import time
+import uuid
 from collections import defaultdict
 from pathlib import Path
 
@@ -30,6 +31,10 @@ sys.path.insert(0, str(ROOT / "src"))
 
 from vision.analytics.tracker import CameraTracker  # noqa: E402
 from vision.analytics.zones import foot_point, load_zones  # noqa: E402
+from vision.face.face_service import FaceService  # noqa: E402
+from vision.face.participants import FACE_EVENTS, ParticipantCollector  # noqa: E402
+from vision.face.storage import LocalSnapshotStorage  # noqa: E402
+from vision.face.track_buffer import TrackBuffer  # noqa: E402
 from vision.rules import RuleContext, build_rules, required_inputs  # noqa: E402
 from vision.inference.detector import BatchDetector  # noqa: E402
 from vision.inference.fire import FireDetector  # noqa: E402
@@ -95,9 +100,10 @@ def grid(tiles: list[np.ndarray], tile_w: int = 640) -> np.ndarray:
     return np.vstack(rows)
 
 
-def log_event(d) -> None:
+def log_event(d, event_id: str) -> None:
     """Пока нет MQTT (шаг 8) — событие в лог одной строкой JSON."""
     msg = {
+        "event_id": event_id,
         "incident_type": d.incident_type, "event_type": d.event_type, "camera_id": d.camera_id,
         "occurred_at": d.occurred_at.isoformat(timespec="milliseconds"),
         "confidence": d.confidence, "zone_id": d.zone_id, "zone_version": d.zone_version,
@@ -106,6 +112,15 @@ def log_event(d) -> None:
                           "confidence": p.confidence} for p in d.participants],
     }
     logging.warning("EVENT %s", json.dumps(msg, ensure_ascii=False))
+
+
+def log_participant(m) -> None:
+    """Сообщение участника (шаг 8 — топик .../participants); вектор в логе сокращён."""
+    msg = m.to_dict()
+    if msg["embedding"]:
+        msg["embedding"] = f"[{len(msg['embedding'])} чисел: {msg['embedding'][:3]}...]"
+    logging.warning("PARTICIPANT %s%s", json.dumps(msg, ensure_ascii=False),
+                    f"  (причина: {m.reason})" if m.reason else "")
 
 
 def main() -> None:
@@ -117,6 +132,7 @@ def main() -> None:
     p.add_argument("--fps", type=float, default=None, help="process_fps (по умолчанию из конфига / 8)")
     p.add_argument("--fast", action="store_true", help="файлы без ожидания (бенчмарк)")
     p.add_argument("--no-show", action="store_true", help="без окна, только статистика")
+    p.add_argument("--no-faces", action="store_true", help="не считать лица участников (шаг 7)")
     args = p.parse_args()
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 
@@ -183,6 +199,32 @@ def main() -> None:
             fire_cams = set()
     last_fire_run: dict[str, object] = {}
 
+    # лица: только камеры, где есть правила с подтверждающими событиями (zone/fall/fight)
+    face_incidents = {inc for inc, _ in FACE_EVENTS}
+    face_cams = {cid for cid, rs in rules.items() if any(r.incident_type in face_incidents for r in rs)}
+    collectors: dict[str, ParticipantCollector] = {}
+    n_participants = defaultdict(lambda: defaultdict(int))
+    if face_cams and not args.no_faces:
+        face_cfg = dict(app["face"])
+        face_service = FaceService.from_config(face_cfg)
+        storage = LocalSnapshotStorage(ROOT / face_cfg.get("storage", "data/snapshots"))
+        for cid in face_cams:
+            buf = TrackBuffer(keep_s=float(face_cfg.get("buffer_s", 5)), every_n=int(face_cfg.get("every_n", 3)),
+                              upper_frac=float(face_cfg.get("upper_frac", 0.5)),
+                              lost_s=float(app["tracker"].get("lost_s", 2.0)))
+            collectors[cid] = ParticipantCollector(cid, face_service, storage, buf,
+                                                   float(face_cfg.get("after_s", 2)))
+            status.set_rule(cid, "faces", f"on ({face_service.model_version})")
+        logging.info("лица участников для камер: %s", sorted(face_cams))
+    elif face_cams:
+        for cid in face_cams:
+            status.set_rule(cid, "faces", "off: --no-faces")
+
+    def emit_participants(cid, msgs):
+        for m in msgs:
+            n_participants[cid]["face" if m.embedding else "no_usable_face"] += 1
+            log_participant(m)
+
     pose_cams = {cid for cid, rs in rules.items() if "poses" in required_inputs(rs)}
     pose_model, match_iou = None, 0.5
     if pose_cams:
@@ -244,9 +286,14 @@ def main() -> None:
                     seen[f.camera_id][(f.session, t.track_id)] += 1
 
                 cam_rules = rules[f.camera_id]
+                col = collectors.get(f.camera_id)
                 if sessions.get(f.camera_id) not in (None, f.session):
                     for r in cam_rules:
                         r.reset()                               # после переподключения старые id недействительны
+                    if col:
+                        emit_participants(f.camera_id, col.reset())
+                if col:                                         # кропы в память; лица — только по событию
+                    emit_participants(f.camera_id, col.on_frame(f.ts, f.image, tracks))
                 sessions[f.camera_id] = f.session
                 h, w = f.image.shape[:2]
                 poses = attach_poses(tracks, pose_by_idx[idx], match_iou) if idx in pose_by_idx else None
@@ -256,7 +303,10 @@ def main() -> None:
                 for r in cam_rules:
                     for d in r.update(ctx):
                         n_events[f.camera_id] += 1
-                        log_event(d)
+                        event_id = str(uuid.uuid4())            # в шаге 8 его будет ставить Publisher
+                        log_event(d, event_id)
+                        if col:
+                            col.on_event(d, event_id)           # сам проверит, подтверждающее ли событие
                         for p_ in d.participants[:1]:
                             alerts[f.camera_id][p_.track_id] = time.monotonic() + 2
 
@@ -279,6 +329,8 @@ def main() -> None:
         pass
     finally:
         bus.stop()
+        for cid, col in collectors.items():
+            emit_participants(cid, col.flush())
         cv2.destroyAllWindows()
 
     wall = time.monotonic() - t_start
@@ -295,7 +347,8 @@ def main() -> None:
         lens = sorted(seen[cid].values(), reverse=True)
         short = sum(1 for n in lens if n < 8)
         print(f"{cid}: кадров {n_frames[cid]}, треков {len(lens)}, "
-              f"коротких (<8 кадров) {short}, самые длинные: {lens[:5]}, событий {n_events[cid]}")
+              f"коротких (<8 кадров) {short}, самые длинные: {lens[:5]}, событий {n_events[cid]}"
+              + (f", участников: {dict(n_participants[cid])}" if cid in collectors else ""))
     print("Смены ID считаются вручную: сколько раз один и тот же человек получил новый id "
           "(много коротких треков — признак частых смен).")
 

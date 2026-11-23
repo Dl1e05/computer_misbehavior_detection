@@ -1,0 +1,42 @@
+{
+ "dataset": "lfw",
+ "embedding_model_version": "insightface-buffalo_l-1.0",
+ "images": 13233,
+ "embedded": 13159,
+ "no_usable_face": {
+  "low_det_score": 26,
+  "no_face": 48
+ },
+ "pairs_used": 5939,
+ "pairs_skipped": 61,
+ "verification": {
+  "accuracy_10fold_mean": 0.998,
+  "accuracy_10fold_std": 0.0015,
+  "threshold_10fold_mean": 0.234,
+  "eer": 0.0034,
+  "eer_threshold": 0.18,
+  "same_sim_mean": 0.671,
+  "diff_sim_mean": 0.004,
+  "FAR<=0.01": {
+   "threshold": 0.145,
+   "far": 0.0094,
+   "frr": 0.0027
+  },
+  "FAR<=0.001": {
+   "threshold": 0.22,
+   "far": 0.0007,
+   "frr": 0.0037
+  }
+ },
+ "identification": {
+  "people_in_gallery": 607,
+  "gallery_photos": 1821,
+  "probes": 4863,
+  "rank1_accuracy": 0.9992,
+  "threshold": 0.22,
+  "correct_at_thr": 4859,
+  "wrong_at_thr": 3,
+  "no_match_at_thr": 1
+ },
+ "note": "LFW — проверка работы сервиса; рабочий порог — на своих добровольцах и камерах (M6)"
+}

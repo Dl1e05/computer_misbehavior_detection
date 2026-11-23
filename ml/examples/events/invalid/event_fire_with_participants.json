@@ -1,0 +1,30 @@
+{
+ "_why_invalid": "fire: participants пустой",
+ "schema_version": "1.0",
+ "event_id": "c2d4e6f8-1a3b-4c5d-8e7f-9a0b1c2d3e4f",
+ "event_type": "detection",
+ "incident_type": "fire",
+ "camera_id": "cam-03",
+ "occurred_at": "2026-11-21T05:15:32.480Z",
+ "confidence": 0.71,
+ "participants": [
+  {
+   "track_id": 17,
+   "bbox": [
+    0.322,
+    0.167,
+    0.414,
+    0.639
+   ],
+   "confidence": 0.88
+  }
+ ],
+ "model_version": "ml-0.1.0/fire-yolo26n-1.0.0/fire-mofn-0.1.0",
+ "run_id": "ml-20261121-0501",
+ "bbox": [
+  0.41,
+  0.38,
+  0.52,
+  0.55
+ ]
+}

@@ -47,3 +47,29 @@ face:                      # шаг 7: только участники ПОДТ�
     min_det_score: 0.6
     min_side_px: 48
   storage: data/snapshots  # локальная папка вместо MinIO; ключ faces/<camera>/<дата>/<event_id>_<track>.jpg
+
+node:                      # шаг 8: этот узел ML
+  node_id: ml-node-1       # в топике heartbeat; при нескольких узлах — у каждого свой
+
+mqtt:                      # контракт ML -> BE; брокер в разработке — локальный Mosquitto 2
+  enabled: true            # false или --no-mqtt — только лог
+  host: localhost
+  port: 1883               # 8883 + tls: true — в production
+  tls: false
+  user_env: MQTT_USER      # логин/пароль — из .env (не в git), в разработке можно без них
+  password_env: MQTT_PASS
+  keepalive_s: 10          # брокер считает клиента пропавшим через ~1.5 × keepalive -> Last Will
+  heartbeat_s: 5
+  outbox: data/outbox.sqlite
+
+versions:                  # model_version события = ml + модели, которые участвовали (до 128 символов)
+  ml: 0.1.0
+  detector: yolo26n-det-1.0.0
+  pose: yolo26n-pose-1.0.0
+  tracker: bytetrack-1.0
+  fire: fire-yolo26n-0.0.0 # своих весов ещё нет (M1)
+  rules:
+    zone_intrusion: zone-0.1.0
+    fall: fall-rule-0.1.0
+    fight: fight-heur-0.1.0
+    fire: fire-mofn-0.1.0

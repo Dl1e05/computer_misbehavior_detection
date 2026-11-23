@@ -18,7 +18,6 @@ import json
 import logging
 import sys
 import time
-import uuid
 from collections import defaultdict
 from pathlib import Path
 
@@ -31,6 +30,9 @@ sys.path.insert(0, str(ROOT / "src"))
 
 from vision.analytics.tracker import CameraTracker  # noqa: E402
 from vision.analytics.zones import foot_point, load_zones  # noqa: E402
+from vision.events.builder import ModelVersions, event_from_detection, new_run_id, participant_from  # noqa: E402
+from vision.events.outbox import Outbox  # noqa: E402
+from vision.events.publisher import Publisher  # noqa: E402
 from vision.face.face_service import FaceService  # noqa: E402
 from vision.face.participants import FACE_EVENTS, ParticipantCollector  # noqa: E402
 from vision.face.storage import LocalSnapshotStorage  # noqa: E402
@@ -100,27 +102,18 @@ def grid(tiles: list[np.ndarray], tile_w: int = 640) -> np.ndarray:
     return np.vstack(rows)
 
 
-def log_event(d, event_id: str) -> None:
-    """Пока нет MQTT (шаг 8) — событие в лог одной строкой JSON."""
-    msg = {
-        "event_id": event_id,
-        "incident_type": d.incident_type, "event_type": d.event_type, "camera_id": d.camera_id,
-        "occurred_at": d.occurred_at.isoformat(timespec="milliseconds"),
-        "confidence": d.confidence, "zone_id": d.zone_id, "zone_version": d.zone_version,
-        "episode_id": d.episode_id, "bbox": list(d.bbox) if d.bbox else None,
-        "participants": [{"track_id": p.track_id, "bbox": [round(v, 3) for v in p.bbox],
-                          "confidence": p.confidence} for p in d.participants],
-    }
-    logging.warning("EVENT %s", json.dumps(msg, ensure_ascii=False))
+def log_event(e) -> None:
+    """Event (контракт шага 8) одной строкой — то же, что уходит в MQTT."""
+    logging.warning("EVENT %s", e.to_bytes().decode("utf-8"))
 
 
-def log_participant(m) -> None:
-    """Сообщение участника (шаг 8 — топик .../participants); вектор в логе сокращён."""
-    msg = m.to_dict()
-    if msg["embedding"]:
+def log_participant(p, reason: str | None = None) -> None:
+    """Сообщение участника (топик .../participants); вектор в логе сокращён."""
+    msg = json.loads(p.to_bytes())
+    if msg.get("embedding"):
         msg["embedding"] = f"[{len(msg['embedding'])} чисел: {msg['embedding'][:3]}...]"
     logging.warning("PARTICIPANT %s%s", json.dumps(msg, ensure_ascii=False),
-                    f"  (причина: {m.reason})" if m.reason else "")
+                    f"  (причина: {reason})" if reason else "")
 
 
 def main() -> None:
@@ -133,6 +126,7 @@ def main() -> None:
     p.add_argument("--fast", action="store_true", help="файлы без ожидания (бенчмарк)")
     p.add_argument("--no-show", action="store_true", help="без окна, только статистика")
     p.add_argument("--no-faces", action="store_true", help="не считать лица участников (шаг 7)")
+    p.add_argument("--no-mqtt", action="store_true", help="не отправлять в MQTT, только лог (шаг 8)")
     args = p.parse_args()
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 
@@ -220,10 +214,44 @@ def main() -> None:
         for cid in face_cams:
             status.set_rule(cid, "faces", "off: --no-faces")
 
+    # отправка (шаг 8): Detection -> Event -> outbox -> MQTT; run_id — id этого запуска
+    run_id = new_run_id()
+    versions = ModelVersions(app.get("versions", {}))
+    mqtt_cfg = dict(app.get("mqtt", {}))
+    publisher = None
+    if mqtt_cfg.get("enabled", True) and not args.no_mqtt:
+        outbox = Outbox(ROOT / mqtt_cfg.get("outbox", "data/outbox.sqlite"))
+        publisher = Publisher.from_config({**mqtt_cfg, **app.get("node", {})}, run_id, outbox,
+                                          status_fn=status.snapshot, model_version=versions.node()).start()
+        logging.info("MQTT: %s:%s, node %s, run %s, в outbox с прошлых запусков: %d",
+                     publisher.host, publisher.port, publisher.node_id, run_id, len(outbox))
+    else:
+        logging.info("MQTT выключен — события только в лог (run %s)", run_id)
+    n_sent = defaultdict(int)
+
     def emit_participants(cid, msgs):
         for m in msgs:
             n_participants[cid]["face" if m.embedding else "no_usable_face"] += 1
-            log_participant(m)
+            try:
+                part = participant_from(m)
+            except ValueError as e:                     # не по контракту — не отправляем, но и не падаем
+                logging.error("участник не по контракту: %s", e)
+                continue
+            log_participant(part, m.reason)
+            if publisher:
+                publisher.submit_participant(part)
+
+    def emit_event(rule, d):
+        try:
+            e = event_from_detection(d, run_id, versions.for_incident(d.incident_type, rule.requires))
+        except ValueError as err:
+            logging.error("событие %s/%s не по контракту, не отправлено: %s", d.incident_type, d.event_type, err)
+            return None
+        log_event(e)
+        if publisher:
+            publisher.submit_event(e)
+            n_sent[d.camera_id] += 1
+        return str(e.event_id)
 
     pose_cams = {cid for cid, rs in rules.items() if "poses" in required_inputs(rs)}
     pose_model, match_iou = None, 0.5
@@ -303,9 +331,8 @@ def main() -> None:
                 for r in cam_rules:
                     for d in r.update(ctx):
                         n_events[f.camera_id] += 1
-                        event_id = str(uuid.uuid4())            # в шаге 8 его будет ставить Publisher
-                        log_event(d, event_id)
-                        if col:
+                        event_id = emit_event(r, d)             # event_id ставится один раз — и для лиц
+                        if col and event_id:
                             col.on_event(d, event_id)           # сам проверит, подтверждающее ли событие
                         for p_ in d.participants[:1]:
                             alerts[f.camera_id][p_.track_id] = time.monotonic() + 2
@@ -331,6 +358,11 @@ def main() -> None:
         bus.stop()
         for cid, col in collectors.items():
             emit_participants(cid, col.flush())
+        if publisher:
+            publisher.stop(flush_timeout=5)
+            left = len(publisher.outbox)
+            print(f"MQTT: подтверждено брокером {publisher.sent}, heartbeat {publisher.heartbeats}, "
+                  f"осталось в outbox {left}" + (" (уйдут при следующем запуске)" if left else ""))
         cv2.destroyAllWindows()
 
     wall = time.monotonic() - t_start

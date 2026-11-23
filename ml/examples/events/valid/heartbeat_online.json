@@ -1,0 +1,25 @@
+{
+ "schema_version": "1.0",
+ "node_id": "ml-node-1",
+ "run_id": "ml-20261121-0501",
+ "status": "online",
+ "sent_at": "2026-11-21T05:15:32.480Z",
+ "model_version": "ml-0.1.0/yolo26n-det-1.0.0/yolo26n-pose-1.0.0/bytetrack-1.0",
+ "cameras": [
+  {
+   "camera_id": "cam-01",
+   "status": "online",
+   "rules": {
+    "zone_intrusion": "on",
+    "fight": "on"
+   }
+  },
+  {
+   "camera_id": "cam-03",
+   "status": "offline",
+   "rules": {
+    "fire": "off: нет весов (обучение — Фаза 3.1)"
+   }
+  }
+ ]
+}

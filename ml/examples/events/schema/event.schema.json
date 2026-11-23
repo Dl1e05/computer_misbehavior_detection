@@ -1,0 +1,196 @@
+{
+ "$defs": {
+  "EventParticipant": {
+   "additionalProperties": false,
+   "properties": {
+    "track_id": {
+     "minimum": 0,
+     "title": "Track Id",
+     "type": "integer"
+    },
+    "bbox": {
+     "maxItems": 4,
+     "minItems": 4,
+     "prefixItems": [
+      {
+       "type": "number"
+      },
+      {
+       "type": "number"
+      },
+      {
+       "type": "number"
+      },
+      {
+       "type": "number"
+      }
+     ],
+     "title": "Bbox",
+     "type": "array"
+    },
+    "confidence": {
+     "maximum": 1.0,
+     "minimum": 0.0,
+     "title": "Confidence",
+     "type": "number"
+    }
+   },
+   "required": [
+    "track_id",
+    "bbox",
+    "confidence"
+   ],
+   "title": "EventParticipant",
+   "type": "object"
+  }
+ },
+ "additionalProperties": false,
+ "properties": {
+  "schema_version": {
+   "const": "1.0",
+   "default": "1.0",
+   "title": "Schema Version",
+   "type": "string"
+  },
+  "event_id": {
+   "format": "uuid",
+   "title": "Event Id",
+   "type": "string"
+  },
+  "event_type": {
+   "enum": [
+    "detection",
+    "suspicion",
+    "confirmation"
+   ],
+   "title": "Event Type",
+   "type": "string"
+  },
+  "incident_type": {
+   "pattern": "^[a-z][a-z0-9_]{1,63}$",
+   "title": "Incident Type",
+   "type": "string"
+  },
+  "camera_id": {
+   "maxLength": 128,
+   "minLength": 1,
+   "pattern": "^[A-Za-z0-9._:\\-]+$",
+   "title": "Camera Id",
+   "type": "string"
+  },
+  "occurred_at": {
+   "format": "date-time",
+   "title": "Occurred At",
+   "type": "string"
+  },
+  "confidence": {
+   "maximum": 1.0,
+   "minimum": 0.0,
+   "title": "Confidence",
+   "type": "number"
+  },
+  "participants": {
+   "items": {
+    "$ref": "#/$defs/EventParticipant"
+   },
+   "title": "Participants",
+   "type": "array"
+  },
+  "model_version": {
+   "maxLength": 128,
+   "minLength": 1,
+   "title": "Model Version",
+   "type": "string"
+  },
+  "run_id": {
+   "maxLength": 128,
+   "minLength": 1,
+   "pattern": "^[A-Za-z0-9._:\\-]+$",
+   "title": "Run Id",
+   "type": "string"
+  },
+  "zone_id": {
+   "anyOf": [
+    {
+     "maxLength": 128,
+     "minLength": 1,
+     "pattern": "^[A-Za-z0-9._:\\-]+$",
+     "type": "string"
+    },
+    {
+     "type": "null"
+    }
+   ],
+   "default": null,
+   "title": "Zone Id"
+  },
+  "zone_version": {
+   "anyOf": [
+    {
+     "minimum": 0,
+     "type": "integer"
+    },
+    {
+     "type": "null"
+    }
+   ],
+   "default": null,
+   "title": "Zone Version"
+  },
+  "episode_id": {
+   "anyOf": [
+    {
+     "maxLength": 128,
+     "minLength": 1,
+     "type": "string"
+    },
+    {
+     "type": "null"
+    }
+   ],
+   "default": null,
+   "title": "Episode Id"
+  },
+  "bbox": {
+   "anyOf": [
+    {
+     "maxItems": 4,
+     "minItems": 4,
+     "prefixItems": [
+      {
+       "type": "number"
+      },
+      {
+       "type": "number"
+      },
+      {
+       "type": "number"
+      },
+      {
+       "type": "number"
+      }
+     ],
+     "type": "array"
+    },
+    {
+     "type": "null"
+    }
+   ],
+   "default": null,
+   "title": "Bbox"
+  }
+ },
+ "required": [
+  "event_id",
+  "event_type",
+  "incident_type",
+  "camera_id",
+  "occurred_at",
+  "confidence",
+  "participants",
+  "model_version",
+  "run_id"
+ ],
+ "title": "Event",
+ "type": "object"
+}

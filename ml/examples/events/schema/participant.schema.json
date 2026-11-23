@@ -1,0 +1,87 @@
+{
+ "additionalProperties": false,
+ "description": "Данные лица участника подтверждённого события (отдельный топик .../participants).",
+ "properties": {
+  "schema_version": {
+   "const": "1.0",
+   "default": "1.0",
+   "title": "Schema Version",
+   "type": "string"
+  },
+  "event_id": {
+   "format": "uuid",
+   "title": "Event Id",
+   "type": "string"
+  },
+  "camera_id": {
+   "maxLength": 128,
+   "minLength": 1,
+   "pattern": "^[A-Za-z0-9._:\\-]+$",
+   "title": "Camera Id",
+   "type": "string"
+  },
+  "track_id": {
+   "minimum": 0,
+   "title": "Track Id",
+   "type": "integer"
+  },
+  "snapshot_ref": {
+   "anyOf": [
+    {
+     "maxLength": 512,
+     "minLength": 1,
+     "type": "string"
+    },
+    {
+     "type": "null"
+    }
+   ],
+   "default": null,
+   "title": "Snapshot Ref"
+  },
+  "snapshot_quality": {
+   "anyOf": [
+    {
+     "maximum": 1.0,
+     "minimum": 0.0,
+     "type": "number"
+    },
+    {
+     "const": "no_usable_face",
+     "type": "string"
+    }
+   ],
+   "title": "Snapshot Quality"
+  },
+  "embedding": {
+   "anyOf": [
+    {
+     "items": {
+      "type": "number"
+     },
+     "type": "array"
+    },
+    {
+     "type": "null"
+    }
+   ],
+   "default": null,
+   "title": "Embedding"
+  },
+  "embedding_model_version": {
+   "maxLength": 128,
+   "minLength": 1,
+   "title": "Embedding Model Version",
+   "type": "string"
+  }
+ },
+ "required": [
+  "event_id",
+  "camera_id",
+  "track_id",
+  "snapshot_quality",
+  "embedding_model_version"
+ ],
+ "title": "Participant",
+ "type": "object"
+}

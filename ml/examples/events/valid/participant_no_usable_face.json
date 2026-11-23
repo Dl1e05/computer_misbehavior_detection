@@ -1,0 +1,8 @@
+{
+ "schema_version": "1.0",
+ "event_id": "0b7c2f0e-5a1d-4c4e-9a43-3f1b6f9d2a10",
+ "camera_id": "cam-01",
+ "track_id": 21,
+ "snapshot_quality": "no_usable_face",
+ "embedding_model_version": "insightface-buffalo_l-1.0"
+}

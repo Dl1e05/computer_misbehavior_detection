@@ -1,0 +1,24 @@
+{
+ "_why_invalid": "suspicion/confirmation — только у fight",
+ "schema_version": "1.0",
+ "event_id": "9a1d7c55-0c41-4f3e-8e21-6d2b5a9f1c33",
+ "event_type": "suspicion",
+ "incident_type": "fall",
+ "camera_id": "cam-02",
+ "occurred_at": "2026-11-21T05:15:32.480Z",
+ "confidence": 0.9,
+ "participants": [
+  {
+   "track_id": 21,
+   "bbox": [
+    0.391,
+    0.181,
+    0.477,
+    0.653
+   ],
+   "confidence": 0.83
+  }
+ ],
+ "model_version": "ml-0.1.0/yolo26n-det-1.0.0/bytetrack-1.0/yolo26n-pose-1.0.0/fall-rule-0.1.0",
+ "run_id": "ml-20261121-0501"
+}

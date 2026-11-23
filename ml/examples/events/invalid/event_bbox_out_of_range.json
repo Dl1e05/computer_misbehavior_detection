@@ -1,0 +1,26 @@
+{
+ "_why_invalid": "bbox — доли 0–1",
+ "schema_version": "1.0",
+ "event_id": "5f0c3b52-8d0e-4f0b-9f5e-2b6c1a7d9e01",
+ "event_type": "detection",
+ "incident_type": "zone_intrusion",
+ "camera_id": "cam-01",
+ "occurred_at": "2026-11-21T05:15:32.480Z",
+ "confidence": 0.86,
+ "participants": [
+  {
+   "track_id": 17,
+   "bbox": [
+    0.3,
+    0.1,
+    1.4,
+    0.6
+   ],
+   "confidence": 0.88
+  }
+ ],
+ "model_version": "ml-0.1.0/yolo26n-det-1.0.0/bytetrack-1.0/zone-0.1.0",
+ "run_id": "ml-20261121-0501",
+ "zone_id": "zone-3",
+ "zone_version": 2
+}

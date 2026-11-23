@@ -1,0 +1,110 @@
+{
+ "$defs": {
+  "CameraStatus": {
+   "additionalProperties": false,
+   "properties": {
+    "camera_id": {
+     "maxLength": 128,
+     "minLength": 1,
+     "pattern": "^[A-Za-z0-9._:\\-]+$",
+     "title": "Camera Id",
+     "type": "string"
+    },
+    "status": {
+     "enum": [
+      "online",
+      "offline"
+     ],
+     "title": "Status",
+     "type": "string"
+    },
+    "rules": {
+     "additionalProperties": {
+      "type": "string"
+     },
+     "default": {},
+     "title": "Rules",
+     "type": "object"
+    }
+   },
+   "required": [
+    "camera_id",
+    "status"
+   ],
+   "title": "CameraStatus",
+   "type": "object"
+  }
+ },
+ "additionalProperties": false,
+ "properties": {
+  "schema_version": {
+   "const": "1.0",
+   "default": "1.0",
+   "title": "Schema Version",
+   "type": "string"
+  },
+  "node_id": {
+   "maxLength": 128,
+   "minLength": 1,
+   "pattern": "^[A-Za-z0-9._:\\-]+$",
+   "title": "Node Id",
+   "type": "string"
+  },
+  "run_id": {
+   "maxLength": 128,
+   "minLength": 1,
+   "pattern": "^[A-Za-z0-9._:\\-]+$",
+   "title": "Run Id",
+   "type": "string"
+  },
+  "status": {
+   "enum": [
+    "online",
+    "offline"
+   ],
+   "title": "Status",
+   "type": "string"
+  },
+  "sent_at": {
+   "anyOf": [
+    {
+     "format": "date-time",
+     "type": "string"
+    },
+    {
+     "type": "null"
+    }
+   ],
+   "default": null,
+   "title": "Sent At"
+  },
+  "model_version": {
+   "anyOf": [
+    {
+     "maxLength": 128,
+     "type": "string"
+    },
+    {
+     "type": "null"
+    }
+   ],
+   "default": null,
+   "title": "Model Version"
+  },
+  "cameras": {
+   "default": [],
+   "items": {
+    "$ref": "#/$defs/CameraStatus"
+   },
+   "title": "Cameras",
+   "type": "array"
+  }
+ },
+ "required": [
+  "node_id",
+  "run_id",
+  "status"
+ ],
+ "title": "Heartbeat",
+ "type": "object"
+}

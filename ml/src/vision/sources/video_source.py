@@ -15,7 +15,7 @@ import os
 import re
 import threading
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from typing import Callable, Iterator
 
@@ -35,6 +35,7 @@ class Frame:
     image: np.ndarray     # BGR-кадр
     index: int            # номер отданного кадра в текущей сессии
     session: int          # растёт после каждого переподключения -> сбросить трекер и правила
+    t_read: float = field(default_factory=time.monotonic)   # когда кадр стал доступен (для задержки, шаг 9)
 
     @property
     def ts_iso(self) -> str:
@@ -85,7 +86,7 @@ class VideoSource:
         # только для live
         self._lock = threading.Lock()
         self._new_frame = threading.Condition(self._lock)
-        self._latest: tuple[datetime, np.ndarray] | None = None
+        self._latest: tuple[datetime, np.ndarray, float] | None = None
         self._latest_seq = 0
         self._thread: threading.Thread | None = None
 
@@ -147,13 +148,16 @@ class VideoSource:
             index = 0
             try:
                 while not self._stop.is_set():
-                    ok, img = cap.read()
-                    if not ok:
-                        break
                     video_t = n_read / file_fps
                     n_read += 1
                     if video_t + 1e-9 < next_t:
-                        continue          # лишний кадр — выбрасываем сразу
+                        # лишний кадр: grab() без перевода в BGR — в ~6 раз дешевле read() (шаг 9)
+                        if not cap.grab():
+                            break
+                        continue
+                    ok, img = cap.read()
+                    if not ok:
+                        break
                     next_t += step
                     if self.realtime:
                         delay = video_t - (time.monotonic() - wall_start)
@@ -201,7 +205,7 @@ class VideoSource:
                         self._latest = None
                     self._set_status(ONLINE)
                 with self._lock:
-                    self._latest = (datetime.now(timezone.utc), img)
+                    self._latest = (datetime.now(timezone.utc), img, time.monotonic())
                     self._latest_seq += 1
                     self._new_frame.notify_all()
             cap.release()
@@ -236,13 +240,13 @@ class VideoSource:
                         self._new_frame.wait(timeout=0.5)
                     if self._stop.is_set():
                         break
-                    ts, img = self._latest
+                    ts, img, t_read = self._latest
                     last_seq = self._latest_seq
                     cur_session = self.session
                 if cur_session != session:
                     session, index = cur_session, 0
                 next_due = max(next_due + step, time.monotonic())
-                yield Frame(self.camera_id, ts, img, index, session)
+                yield Frame(self.camera_id, ts, img, index, session, t_read)
                 index += 1
         finally:
             self.stop()

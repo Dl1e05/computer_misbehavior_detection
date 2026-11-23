@@ -26,6 +26,8 @@ class FrameBus:
         self._cond = threading.Condition()
         self._threads: list[threading.Thread] = []
         self._stop = threading.Event()
+        self.produced: dict[str, int] = {s.camera_id: 0 for s in sources}   # кадров от Reader
+        self.dropped: dict[str, int] = {s.camera_id: 0 for s in sources}    # затёрто непрочитанными
 
     def start(self) -> "FrameBus":
         for src in self.sources:
@@ -44,7 +46,10 @@ class FrameBus:
                     while (not self.drop_old and src.camera_id in self._latest
                            and not self._stop.is_set()):
                         self._cond.wait(0.5)              # ждём, пока заберут прошлый кадр
+                    if src.camera_id in self._latest:
+                        self.dropped[src.camera_id] += 1  # модель не успела — старый кадр пропал
                     self._latest[src.camera_id] = frame   # иначе старый непрочитанный затираем
+                    self.produced[src.camera_id] += 1
                     self._cond.notify_all()
         finally:
             with self._cond:

@@ -1,5 +1,6 @@
 import hashlib
 import json
+import math
 import uuid
 from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime, timedelta
@@ -300,8 +301,10 @@ async def test_embedding_in_any_event_is_a_privacy_violation(
     dead_letter = await only_dead_letter(db_session)
     assert dead_letter.raw_payload is not None
     assert "0.123456789" not in json.dumps(dead_letter.raw_payload)
-    participant = dead_letter.raw_payload["participants"][0]
-    assert participant["embedding_model_version"] == "insightface-buffalo_l-1.0"
+    # The rest of the message stays, for diagnostics.
+    assert dead_letter.raw_payload["participants"] == [
+        {"track_id": 17, "confidence": 0.91}
+    ]
 
     audit = await only_audit_entry(db_session)
     assert audit.action == "event.privacy_violation"
@@ -331,6 +334,38 @@ async def test_any_face_field_is_a_privacy_violation(
 
     assert outcome.code is FailureCode.BIOMETRIC_NOT_ALLOWED
     assert (await only_audit_entry(db_session)).action == "event.privacy_violation"
+    dead_letter = await only_dead_letter(db_session)
+    assert dead_letter.raw_payload is not None
+    assert not face_data.keys() & dead_letter.raw_payload["participants"][0].keys()
+
+
+@pytest.mark.usefixtures("camera_id")
+@pytest.mark.parametrize(
+    ("changes", "expected"),
+    [
+        pytest.param(
+            {"embedding": [math.nan]},
+            FailureCode.BIOMETRIC_NOT_ALLOWED,
+            id="NaN in the embedding",
+        ),
+        pytest.param(
+            {"embedding": [0.1], "confidence": math.nan},
+            FailureCode.INVALID_CONFIDENCE,
+            id="NaN next to it",
+        ),
+    ],
+)
+async def test_face_data_with_nan_is_audited(
+    db_session: AsyncSession, changes: dict[str, Any], expected: FailureCode
+) -> None:
+    payload = event()
+    payload["participants"][0] |= changes
+    outcome = await ingest(db_session, encode(payload))
+
+    assert outcome.code is expected
+    audit = await only_audit_entry(db_session)
+    assert audit.object_id == EVENT_ID
+    assert audit.access_context == {"topic": TOPIC, "camera_id": "cam-01"}
 
 
 @pytest.mark.usefixtures("camera_id")
@@ -372,7 +407,9 @@ async def test_dead_letter_with_nan_is_written(db_session: AsyncSession) -> None
             {"confidence": 1.5}, FailureCode.INVALID_CONFIDENCE, id="V13 before V14"
         ),
         pytest.param(
-            {"event_id": "bad"}, FailureCode.INVALID_EVENT_ID, id="V4 before V14"
+            {"event_type": "suspicion"},
+            FailureCode.INVALID_STAGE_TYPE_PAIR,
+            id="V7 before V14",
         ),
     ],
 )

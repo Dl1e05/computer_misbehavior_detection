@@ -27,6 +27,10 @@ def valid_event() -> dict[str, Any]:
     }
 
 
+# A participant with face data, otherwise valid.
+FACE = {"track_id": 17, "confidence": 0.91, "embedding": [0.1]}
+
+
 def rejected(raw: bytes) -> Rejection:
     result = parse_event(raw, LIMITS)
     assert isinstance(result, Rejection), result
@@ -171,6 +175,26 @@ def test_rule_error_codes_pass_through() -> None:
             {"participants": [{"track_id": 1, "confidence": 2, "embedding": [0.1]}]},
             FailureCode.INVALID_CONFIDENCE,
             id="V13 before V14",
+        ),
+        pytest.param(
+            {"event_type": "suspicion", "participants": [FACE]},
+            FailureCode.INVALID_STAGE_TYPE_PAIR,
+            id="V7 before V14",
+        ),
+        pytest.param(
+            {"occurred_at": "2026-10-25T10:00:00Z", "participants": [FACE]},
+            FailureCode.INVALID_TIMESTAMP,
+            id="V9 before V14",
+        ),
+        pytest.param(
+            {"incident_type": "zone_intrusion", "participants": [FACE]},
+            FailureCode.INVALID_ZONE,
+            id="V11 before V14",
+        ),
+        pytest.param(
+            {"participants": [FACE, FACE]},
+            FailureCode.INVALID_PARTICIPANTS,
+            id="V12 before V14",
         ),
     ],
 )

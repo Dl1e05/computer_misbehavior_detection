@@ -40,7 +40,7 @@ _SEVERITY_PAIRS = ", ".join(
 _BBOX_NORMALIZED = (
     "bbox IS NULL OR (array_position(bbox, NULL) IS NULL "
     "AND 0 <= ALL (bbox) AND 1 >= ALL (bbox) "
-    "AND bbox[1] < bbox[3] AND bbox[2] < bbox[4])"
+    "AND bbox[1] <= bbox[3] AND bbox[2] <= bbox[4])"
 )
 
 # Built from the enum, so the partial indexes cannot silently match nothing.
@@ -117,15 +117,16 @@ class Participant(EntityMixin, Base):
 
     __tablename__ = "participants"
     __table_args__ = (
-        # One row per tracked person per incident; track ids start again in
-        # each run of ML. Also serves as the index for incident_id, since it
-        # is the first column.
+        # One row per tracked person per incident (so per camera); track ids
+        # start again in each run of ML. Also serves as the index for
+        # incident_id, since it is the first column.
         UniqueConstraint("incident_id", "run_id", "track_id"),
         CheckConstraint(
             "confidence >= 0 AND confidence <= 1", name="confidence_in_range"
         ),
         CheckConstraint("cardinality(bbox) = 4", name="bbox_has_4_values"),
         CheckConstraint(_BBOX_NORMALIZED, name="bbox_normalized"),
+        CheckConstraint("track_id >= 0", name="track_id_not_negative"),
     )
 
     # A participant means nothing without its incident.
@@ -134,8 +135,9 @@ class Participant(EntityMixin, Base):
     )
     # The run of the ML process that gave the track id.
     run_id: Mapped[str]
-    # Tracker id from ML (a number, kept as text), unique only within one run.
-    track_id: Mapped[str]
+    # Tracker id from ML, unique per camera and run. BigInteger: the contract
+    # allows any 64-bit number.
+    track_id: Mapped[int] = mapped_column(BigInteger)
     confidence: Mapped[float]
     # [x1, y1, x2, y2] as fractions of the frame (0..1); optional (SRS §7.3).
     bbox: Mapped[list[float] | None] = mapped_column(ARRAY(Float))

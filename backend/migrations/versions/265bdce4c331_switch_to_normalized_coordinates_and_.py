@@ -1,7 +1,7 @@
 """switch to normalized coordinates and run_id
 
-Zones and boxes are fractions of the frame (0..1) instead of pixels, and track
-ids belong to a run of ML. Existing rows are not converted: nothing creates
+Zones and boxes are fractions of the frame (0..1) instead of pixels; track ids
+are numbers and belong to a run of ML. Existing rows are not converted: nothing creates
 them yet, and the migration fails (changing nothing) if the tables have any.
 
 Revision ID: 265bdce4c331
@@ -32,7 +32,7 @@ POLYGON_NORMALIZED = (
 BBOX_NORMALIZED = (
     "bbox IS NULL OR (array_position(bbox, NULL) IS NULL "
     "AND 0 <= ALL (bbox) AND 1 >= ALL (bbox) "
-    "AND bbox[1] < bbox[3] AND bbox[2] < bbox[4])"
+    "AND bbox[1] <= bbox[3] AND bbox[2] <= bbox[4])"
 )
 
 
@@ -77,10 +77,32 @@ def upgrade() -> None:
     op.create_check_constraint(
         op.f("ck_participants_bbox_normalized"), "participants", BBOX_NORMALIZED
     )
+    op.alter_column(
+        "participants",
+        "track_id",
+        type_=sa.BigInteger(),
+        existing_type=sa.String(),
+        existing_nullable=False,
+        postgresql_using="track_id::bigint",
+    )
+    op.create_check_constraint(
+        op.f("ck_participants_track_id_not_negative"), "participants", "track_id >= 0"
+    )
 
 
 def downgrade() -> None:
     """Downgrade schema."""
+    op.drop_constraint(
+        op.f("ck_participants_track_id_not_negative"), "participants", type_="check"
+    )
+    op.alter_column(
+        "participants",
+        "track_id",
+        type_=sa.String(),
+        existing_type=sa.BigInteger(),
+        existing_nullable=False,
+        postgresql_using="track_id::varchar",
+    )
     op.drop_constraint(
         op.f("ck_participants_bbox_normalized"), "participants", type_="check"
     )

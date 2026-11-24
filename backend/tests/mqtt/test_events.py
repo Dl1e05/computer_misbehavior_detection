@@ -119,6 +119,21 @@ def test_whole_numbers_are_accepted_in_bbox() -> None:
     assert event.participants[0].bbox == [0.0, 0.0, 1.0, 1.0]
 
 
+@pytest.mark.parametrize(
+    "bbox",
+    [
+        pytest.param([1.0, 0.1, 1.0, 0.9], id="no width"),
+        pytest.param([0.1, 0.5, 0.9, 0.5], id="no height"),
+    ],
+)
+def test_bbox_without_area_is_accepted(bbox: list[float]) -> None:
+    # A person clipped at the frame edge; the alarm is real.
+    payload = detection("fall")
+    payload["participants"][0] = payload["participants"][0] | {"bbox": bbox}
+    assert parse(payload).participants[0].bbox == bbox
+    assert parse(detection("fire", bbox=bbox)).bbox == bbox
+
+
 INVALID_BOXES = [
     pytest.param([0.1, 0.1, 0.9], id="3 numbers"),
     pytest.param([0.1, 0.1, 0.9, 0.9, 0.9], id="5 numbers"),
@@ -127,8 +142,6 @@ INVALID_BOXES = [
     pytest.param([-0.1, 0.1, 0.9, 0.9], id="below 0"),
     pytest.param([0.9, 0.1, 0.1, 0.9], id="x reversed"),
     pytest.param([0.1, 0.9, 0.9, 0.1], id="y reversed"),
-    pytest.param([0.5, 0.1, 0.5, 0.9], id="no width"),
-    pytest.param([0.1, 0.5, 0.9, 0.5], id="no height"),
     pytest.param([0.1, 0.1, math.nan, 0.9], id="NaN"),
     pytest.param([0.1, 0.1, math.inf, 0.9], id="Infinity"),
     pytest.param(["0.1", 0.1, 0.9, 0.9], id="number as string"),

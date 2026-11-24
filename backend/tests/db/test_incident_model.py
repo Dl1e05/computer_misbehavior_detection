@@ -176,7 +176,7 @@ def make_participant(incident_id: uuid.UUID, **changes: object) -> Participant:
     participant = Participant(
         incident_id=incident_id,
         run_id="run-1",
-        track_id="17",
+        track_id=17,
         confidence=0.9,
         bbox=[0.25, 0.1, 0.5, 0.75],
         model_version="test-model-1",
@@ -200,7 +200,7 @@ async def test_participant_round_trips(
     )
     assert stored is not None
     assert stored.run_id == "run-1"
-    assert stored.track_id == "17"
+    assert stored.track_id == 17
     assert stored.bbox == [0.25, 0.1, 0.5, 0.75]
     assert stored.confidence == 0.9
     assert stored.snapshot_ref is None
@@ -240,6 +240,14 @@ async def test_same_track_in_another_run_is_accepted(
     await db_session.flush()
 
 
+async def test_largest_track_id_is_stored(
+    db_session: AsyncSession, incident_id: uuid.UUID
+) -> None:
+    # The largest track_id the event contract lets through.
+    db_session.add(make_participant(incident_id, track_id=2**63 - 1))
+    await db_session.flush()
+
+
 async def test_participant_needs_a_run_id(
     db_session: AsyncSession, incident_id: uuid.UUID
 ) -> None:
@@ -269,6 +277,9 @@ async def test_same_track_in_another_incident_is_accepted(
         ),
         pytest.param(
             {"confidence": -0.1}, "ck_participants_confidence_in_range", id="conf < 0"
+        ),
+        pytest.param(
+            {"track_id": -1}, "ck_participants_track_id_not_negative", id="track < 0"
         ),
     ],
 )
@@ -310,7 +321,7 @@ async def test_participants_are_removed_with_their_incident(
         pytest.param([-0.1, 0.1, 0.9, 0.9], "bbox_normalized", id="below 0"),
         pytest.param([0.1, 0.1, 0.9, 1.1], "bbox_normalized", id="above 1"),
         pytest.param([0.9, 0.1, 0.1, 0.9], "bbox_normalized", id="x reversed"),
-        pytest.param([0.1, 0.5, 0.9, 0.5], "bbox_normalized", id="no height"),
+        pytest.param([0.1, 0.9, 0.9, 0.1], "bbox_normalized", id="y reversed"),
         pytest.param([0.1, None, 0.9, 0.9], "bbox_normalized", id="null inside"),
         pytest.param([0.1, 0.1, math.nan, 0.9], "bbox_normalized", id="NaN"),
     ],
@@ -331,10 +342,20 @@ async def test_invalid_bbox_is_rejected(
                 db_session.add(row)
 
 
-async def test_bbox_may_cover_the_whole_frame(
-    db_session: AsyncSession, camera_id: uuid.UUID, incident_id: uuid.UUID
+@pytest.mark.parametrize(
+    "box",
+    [
+        pytest.param([0.0, 0.0, 1.0, 1.0], id="whole frame"),
+        pytest.param([1.0, 0.1, 1.0, 0.9], id="no width"),
+        pytest.param([0.1, 0.5, 0.9, 0.5], id="no height"),
+    ],
+)
+async def test_bbox_limits_are_accepted(
+    db_session: AsyncSession,
+    camera_id: uuid.UUID,
+    incident_id: uuid.UUID,
+    box: list[float],
 ) -> None:
-    box = [0.0, 0.0, 1.0, 1.0]
     db_session.add_all(
         [make_participant(incident_id, bbox=box), make_incident(camera_id, bbox=box)]
     )

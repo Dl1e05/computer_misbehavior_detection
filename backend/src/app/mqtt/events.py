@@ -52,13 +52,15 @@ _CONTRACT_CONFIG = ConfigDict(
 # ASCII digits only: \d would also match e.g. Arabic-Indic digits.
 _SCHEMA_VERSION = re.compile(r"([0-9]+)\.([0-9]+)")
 
-# V14: face data of a participant; not allowed in any event.
+# V14: face data of a participant; not allowed in any event. Only these keys of
+# a participant are checked: anywhere else they are unknown fields, which are
+# ignored and never saved.
 FACE_FIELDS = ("embedding", "embedding_model_version", "snapshot_ref")
 
-# The zone version column is a Postgres integer: a larger number would fail to
-# save, so the message would never be acknowledged and would come back forever.
+# Limits of the Postgres columns for zone_version and track_id: a larger number
+# would fail to save, so the message would never be acknowledged and would come
+# back forever.
 _INT32_MAX = 2**31 - 1
-# Agreed range of track ids (stored as text, so not a column limit).
 _INT64_MAX = 2**63 - 1
 
 
@@ -103,8 +105,10 @@ def _limits(info: ValidationInfo) -> EventLimits:
 
 
 def _ordered(box: list[float]) -> list[float]:
-    if not (box[0] < box[2] and box[1] < box[3]):
-        raise ValueError("bbox must be [x1, y1, x2, y2] with x1 < x2 and y1 < y2")
+    # Equal is allowed: ML clips boxes to the frame and rounds them, so a person
+    # at the edge can get a box without width. That must not lose an alarm.
+    if not (box[0] <= box[2] and box[1] <= box[3]):
+        raise ValueError("bbox must be [x1, y1, x2, y2] with x1 <= x2 and y1 <= y2")
     return box
 
 
@@ -119,32 +123,19 @@ NormalizedBox = Annotated[
 class Participant(BaseModel):
     model_config = _CONTRACT_CONFIG
 
-    # ByteTrack id, counted from 0; unique only together with run_id.
+    # ByteTrack id, counted from 0; unique per camera and run_id.
     track_id: int = Field(ge=0, le=_INT64_MAX)
     # Detection or track confidence; not an identity score.
     confidence: float = Field(ge=0, le=1)
     bbox: NormalizedBox | None = None
-    # FACE_FIELDS. Declared only to be refused; Any, so that malformed face
-    # data is reported as face data too.
+    # FACE_FIELDS. Declared only to be refused (V14); Any, so that malformed
+    # face data is reported as face data too.
     embedding: Any = None
     embedding_model_version: Any = None
     snapshot_ref: Any = None
 
-    # Above _no_nul: validators run in this order, and the first error wins.
-    @field_validator(*FACE_FIELDS)
-    @classmethod
-    def _no_face_data(cls, value: object) -> object:
-        # V14
-        if value is not None:
-            raise _fail(
-                FailureCode.BIOMETRIC_NOT_ALLOWED, "face data is not allowed in events"
-            )
-        return value
-
-    @field_validator("*")
-    @classmethod
-    def _no_nul(cls, value: object) -> object:
-        return _without_nul(value)
+    def has_face_data(self) -> bool:
+        return any(getattr(self, field) is not None for field in FACE_FIELDS)
 
 
 class MlEvent(BaseModel):
@@ -208,7 +199,7 @@ class MlEvent(BaseModel):
     # Pydantic runs this only once every field is valid. So if a message has
     # a field error AND a cross-field fault, only the field error's code is
     # seen, even when the cross-field rule has the lower V number. Known
-    # deviation from "first failure in V order" (§7.4): every V1..V15
+    # deviation from "first failure in V order" (§7.4): every V1..V14
     # rejection is handled the same way (§7.5), only the reported code can
     # differ, and it is always a real fault of the message.
     # Within this validator, checks follow the V numbers.
@@ -219,6 +210,7 @@ class MlEvent(BaseModel):
         self._check_not_in_future(limits)
         self._check_zone()
         self._check_participants()
+        self._check_no_face_data()
         return self
 
     def _check_stage_type_pair(self) -> None:
@@ -254,6 +246,13 @@ class MlEvent(BaseModel):
             raise _fail(
                 FailureCode.INVALID_PARTICIPANTS,
                 f"{self.incident_type} needs at least one participant",
+            )
+
+    def _check_no_face_data(self) -> None:
+        # V14: face data has a message of its own.
+        if any(participant.has_face_data() for participant in self.participants):
+            raise _fail(
+                FailureCode.BIOMETRIC_NOT_ALLOWED, "face data is not allowed in events"
             )
 
 

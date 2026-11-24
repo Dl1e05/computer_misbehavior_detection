@@ -1,5 +1,6 @@
 import hashlib
 import json
+import logging
 import math
 import uuid
 from collections.abc import Awaitable, Callable
@@ -10,14 +11,31 @@ import pytest
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.db.models import AuditEntry, Camera, DeadLetter, ProcessedEvent, Zone
+from app.db.models import (
+    AuditEntry,
+    Camera,
+    Clip,
+    DeadLetter,
+    Incident,
+    Participant,
+    ProcessedEvent,
+    Timer,
+    Zone,
+)
 from app.domain.audit import AuditObjectType, AuditResult
 from app.domain.event import FailureCode
 from app.mqtt.events import EventLimits
+from app.services.incidents import IncidentTimings
 from app.services.ingest import IngestOutcome, IngestStatus, ingest_event
 
 RECEIVED_AT = datetime(2026, 10, 25, 9, 14, 4, tzinfo=UTC)
 LIMITS = EventLimits(received_at=RECEIVED_AT, max_future=timedelta(seconds=60))
+TIMINGS = IncidentTimings(
+    escalation=timedelta(seconds=30),
+    clip_pre_roll=timedelta(seconds=5),
+    clip_post_roll=timedelta(seconds=5),
+    clock_skew_warn=timedelta(seconds=2),
+)
 TOPIC = "videoanalytics/v1/cameras/cam-01/events"
 EVENT_ID = "5f0c2a7e-3b9d-4c1a-9e8f-2d7b6a1c0e42"
 
@@ -51,11 +69,21 @@ def encode(payload: dict[str, Any]) -> bytes:
 
 
 async def ingest(session: AsyncSession, raw: bytes) -> IngestOutcome:
-    return await ingest_event(session, raw, topic=TOPIC, limits=LIMITS)
+    return await ingest_event(session, raw, topic=TOPIC, limits=LIMITS, timings=TIMINGS)
 
 
 async def count(session: AsyncSession, model: type[Any]) -> int:
     return await session.scalar(select(func.count()).select_from(model)) or 0
+
+
+# Every row that one fall with one participant creates, once each.
+INCIDENT_ROWS: tuple[type[Any], ...] = (
+    Incident,
+    Participant,
+    Timer,
+    Clip,
+    AuditEntry,
+)
 
 
 async def only_dead_letter(session: AsyncSession) -> DeadLetter:
@@ -80,8 +108,15 @@ async def test_valid_event_is_accepted(db_session: AsyncSession) -> None:
     raw = encode(event())
     outcome = await ingest(db_session, raw)
 
+    incident = (await db_session.scalars(select(Incident))).one()
     assert outcome == IngestOutcome(
-        IngestStatus.ACCEPTED, result={"outcome": "accepted"}
+        IngestStatus.ACCEPTED,
+        result={
+            "outcome": "accepted",
+            "incident_id": str(incident.id),
+            "event_type": "detection",
+            "run_id": "run-1",
+        },
     )
     stored = await db_session.get(ProcessedEvent, uuid.UUID(EVENT_ID))
     assert stored is not None
@@ -94,6 +129,90 @@ async def test_zone_intrusion_with_own_active_zone_is_accepted(
 ) -> None:
     raw = encode(event(incident_type="zone_intrusion", zone_id=str(zone_id)))
     assert (await ingest(db_session, raw)).status is IngestStatus.ACCEPTED
+    incident = (await db_session.scalars(select(Incident))).one()
+    assert incident.zone_id == zone_id
+
+
+@pytest.mark.usefixtures("camera_id")
+@pytest.mark.parametrize("event_type", ["suspicion", "confirmation"])
+async def test_fight_is_accepted_without_an_incident(
+    db_session: AsyncSession, event_type: str
+) -> None:
+    # Fights get their transitions later; until then the event is only recorded.
+    raw = encode(event(event_type=event_type, incident_type="fight"))
+    outcome = await ingest(db_session, raw)
+
+    assert outcome == IngestOutcome(
+        IngestStatus.ACCEPTED,
+        result={
+            "outcome": "accepted",
+            "incident_id": None,
+            "event_type": event_type,
+            "run_id": "run-1",
+        },
+    )
+    for model in INCIDENT_ROWS:
+        assert await count(db_session, model) == 0
+
+
+@pytest.mark.usefixtures("camera_id")
+async def test_nothing_is_saved_if_the_caller_rolls_back(
+    db_session: AsyncSession,
+) -> None:
+    # ingest_event must not commit: the incident and the processed event are
+    # saved together or not at all.
+    await db_session.commit()  # keeps the camera
+    raw = encode(event())
+    await ingest(db_session, raw)
+    await db_session.rollback()
+
+    for model in INCIDENT_ROWS:
+        assert await count(db_session, model) == 0
+    assert await count(db_session, ProcessedEvent) == 0
+    # The broker sends it again, and now it is a first delivery.
+    assert (await ingest(db_session, raw)).status is IngestStatus.ACCEPTED
+
+
+# V10
+
+
+@pytest.mark.usefixtures("camera_id")
+@pytest.mark.parametrize(
+    ("occurred_at", "skew"),
+    [
+        pytest.param("2026-10-25T09:14:01Z", "3.000s", id="ML behind"),
+        pytest.param("2026-10-25T09:14:07Z", "-3.000s", id="ML ahead"),
+    ],
+)
+async def test_large_skew_is_logged_but_accepted(
+    db_session: AsyncSession,
+    caplog: pytest.LogCaptureFixture,
+    occurred_at: str,
+    skew: str,
+) -> None:
+    with caplog.at_level(logging.WARNING, logger="app.services.ingest"):
+        outcome = await ingest(db_session, encode(event(occurred_at=occurred_at)))
+
+    assert outcome.status is IngestStatus.ACCEPTED
+    (message,) = caplog.messages
+    # §6.6: camera, event, both times and the skew.
+    assert message == (
+        f"clock skew: camera=cam-01 event={EVENT_ID} "
+        f"occurred_at={occurred_at.replace('Z', '+00:00')} "
+        f"received_at=2026-10-25T09:14:04+00:00 skew={skew}"
+    )
+
+
+@pytest.mark.usefixtures("camera_id")
+@pytest.mark.parametrize(
+    "occurred_at", ["2026-10-25T09:14:02Z", "2026-10-25T09:14:06Z"]
+)
+async def test_skew_at_the_limit_is_not_logged(
+    db_session: AsyncSession, caplog: pytest.LogCaptureFixture, occurred_at: str
+) -> None:
+    with caplog.at_level(logging.WARNING, logger="app.services.ingest"):
+        await ingest(db_session, encode(event(occurred_at=occurred_at)))
+    assert caplog.messages == []
 
 
 # V16
@@ -108,6 +227,8 @@ async def test_redelivery_returns_stored_result(db_session: AsyncSession) -> Non
     assert second == IngestOutcome(IngestStatus.DUPLICATE, result=first.result)
     assert await count(db_session, ProcessedEvent) == 1
     assert await count(db_session, DeadLetter) == 0
+    for model in INCIDENT_ROWS:
+        assert await count(db_session, model) == 1
 
 
 @pytest.mark.usefixtures("camera_id")
@@ -123,6 +244,7 @@ async def test_same_event_id_with_other_payload_is_a_conflict(
     stored = await db_session.get(ProcessedEvent, uuid.UUID(EVENT_ID))
     assert stored is not None
     assert stored.payload_hash == hashlib.sha256(first_raw).hexdigest()
+    assert await count(db_session, Incident) == 1
     assert (await only_dead_letter(db_session)).failure_code == "EVENT_ID_CONFLICT"
 
 
@@ -140,6 +262,25 @@ async def test_redelivery_after_camera_was_disabled_is_still_a_duplicate(
 
 
 # Rejections and dead letters
+
+
+@pytest.mark.usefixtures("camera_id")
+@pytest.mark.parametrize(
+    "changes",
+    [
+        pytest.param({"occurred_at": "2026-10-25T10:00:00Z"}, id="by the parser"),
+        pytest.param({"camera_id": "cam-09"}, id="by the camera check"),
+        pytest.param({"zone_id": str(uuid.uuid4())}, id="by the zone check"),
+    ],
+)
+async def test_rejected_event_creates_no_incident(
+    db_session: AsyncSession, changes: dict[str, Any]
+) -> None:
+    outcome = await ingest(db_session, encode(event(**changes)))
+
+    assert outcome.status is IngestStatus.REJECTED
+    for model in INCIDENT_ROWS:
+        assert await count(db_session, model) == 0
 
 
 @pytest.mark.usefixtures("camera_id")
@@ -470,12 +611,13 @@ async def test_returned_result_is_a_copy(db_session: AsyncSession) -> None:
     raw = encode(event())
     first = await ingest(db_session, raw)
     assert first.result is not None
+    original = dict(first.result)
     first.result["incident_id"] = "x"
 
     second = await ingest(db_session, raw)
-    assert second.result == {"outcome": "accepted"}
+    assert second.result == original
     assert second.result is not None
     second.result["incident_id"] = "y"
     stored = await db_session.get(ProcessedEvent, uuid.UUID(EVENT_ID))
     assert stored is not None
-    assert stored.result == {"outcome": "accepted"}
+    assert stored.result == original

@@ -62,6 +62,8 @@ mqtt:                      # контракт ML -> BE; брокер в разр
   heartbeat_s: 5
   outbox: data/outbox.sqlite
   send_proposed: false     # типы событий, ещё не согласованные с BE (schema 1.1), — только в лог
+  max_age_s: 600           # событие/участник старше (брокер был недоступен) — не отправляем, а в журнал ниже
+  dropped_log: data/outbox_dropped.jsonl
 
 versions:                  # model_version события = ml + модели, которые участвовали (до 128 символов)
   ml: 0.1.0
@@ -74,6 +76,7 @@ versions:                  # model_version события = ml + модели, �
     fall: fall-rule-0.1.0
     fight: fight-heur-0.1.0
     fire: fire-mofn-0.1.0
+    smoke: smoke-mofn-0.1.0
     line_crossing: line-0.1.0
     loitering: loiter-0.1.0
     crowding: crowd-0.1.0

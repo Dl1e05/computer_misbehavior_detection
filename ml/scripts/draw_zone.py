@@ -6,6 +6,7 @@
     python scripts/draw_zone.py --camera cam-01 --zone zone-1 --at 5      # кадр на 5-й секунде
     python scripts/draw_zone.py --source data/x.mp4 --camera-id cam-05 --zone zone-7
     python scripts/draw_zone.py --camera cam-01 --zone line-door-1 --line  # линия: 2 точки, p1 -> p2
+    python scripts/draw_zone.py --migrate        # старый zones.json: id «zone-1» -> name, id -> UUID
                                      # «in» = переход слева направо, если смотреть от p1 к p2
 Расписание зоны («после 22:00») пока задаётся руками в zones.json: поле "schedule" (см. analytics/zones.py).
 
@@ -28,7 +29,7 @@ import yaml
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
-from vision.analytics.zones import Line, Zone, load_zones, save_zones  # noqa: E402
+from vision.analytics.zones import Line, Zone, find, load_zones, migrate_ids, new_geometry_id, save_zones  # noqa: E402
 
 MAX_W = 1280   # окно не шире этого, координаты всё равно считаются от исходного кадра
 
@@ -51,12 +52,19 @@ def main() -> None:
     p.add_argument("--camera", help="id из configs/cameras.yaml (источник возьмётся оттуда)")
     p.add_argument("--source", help="файл или rtsp:// (тогда нужен --camera-id)")
     p.add_argument("--camera-id", help="к какой камере относится зона при --source")
-    p.add_argument("--zone", required=True, help="id зоны или линии, например zone-1 / line-door-1")
+    p.add_argument("--zone", help="имя (или UUID) зоны/линии, например zone-1 / line-door-1")
+    p.add_argument("--migrate", action="store_true", help="перевести id зон/линий в UUID (имя сохранится)")
     p.add_argument("--line", action="store_true", help="рисовать линию (2 точки) вместо зоны")
     p.add_argument("--at", type=float, default=0.0, help="секунда ролика для кадра")
     p.add_argument("--out", default=str(ROOT / "configs" / "zones.json"))
     args = p.parse_args()
 
+    if args.migrate:
+        for old, new in migrate_ids(args.out):
+            print(f"{old} -> {new}")
+        return
+    if not args.zone:
+        p.error("укажи --zone")
     if args.camera:
         cams = yaml.safe_load((ROOT / "configs" / "cameras.yaml").read_text(encoding="utf-8"))
         cam = next((c for c in cams.get("cameras", []) if c["id"] == args.camera), None)
@@ -76,7 +84,11 @@ def main() -> None:
     base = cv2.resize(frame, (int(w * scale), int(h * scale))) if scale < 1 else frame.copy()
 
     zones = load_zones(args.out)
-    old = zones.get(args.zone)
+    old = find(zones, args.zone)
+    if old is not None and old.camera_id != camera_id:
+        p.error(f"{args.zone} принадлежит камере {old.camera_id}")
+    key = (old.zone_id if isinstance(old, Zone) else old.line_id) if old else new_geometry_id(camera_id, args.zone)
+    name = old.name if old else args.zone
     if old is not None and isinstance(old, Line) != args.line:
         p.error(f"{args.zone} уже есть как {'линия' if isinstance(old, Line) else 'зона'}")
     points: list[tuple[float, float]] = (list(old.points if isinstance(old, Line) else old.polygon)
@@ -96,8 +108,8 @@ def main() -> None:
     while True:
         img = base.copy()
         # остальные зоны этой камеры — серым, для ориентира
-        for key, z in zones.items():
-            if z.camera_id == camera_id and key != args.zone:
+        for k, z in zones.items():
+            if z.camera_id == camera_id and k != key:
                 poly = z.points if isinstance(z, Line) else z.polygon
                 pts = np.array([(x * img.shape[1], y * img.shape[0]) for x, y in poly], np.int32)
                 cv2.polylines(img, [pts], not isinstance(z, Line), (160, 160, 160), 1)
@@ -125,15 +137,15 @@ def main() -> None:
             try:
                 version = old.version + 1 if old else 1
                 if args.line:
-                    zones[args.zone] = Line(args.zone, camera_id, points, version=version)
+                    zones[key] = Line(key, camera_id, points, version=version, name=name)
                 else:
                     schedule = old.schedule if isinstance(old, Zone) else None   # расписание сохраняем
-                    zones[args.zone] = Zone(args.zone, camera_id, points, version=version, schedule=schedule)
+                    zones[key] = Zone(key, camera_id, points, version=version, schedule=schedule, name=name)
             except ValueError as e:
                 print("не сохранено:", e)
                 continue
             save_zones(args.out, zones)
-            print(f"сохранено: {args.zone} (камера {camera_id}, {len(points)} точек, "
+            print(f"сохранено: {name} = {key} (камера {camera_id}, {len(points)} точек, "
                   f"version {version}) -> {args.out}")
             break
     cv2.destroyAllWindows()

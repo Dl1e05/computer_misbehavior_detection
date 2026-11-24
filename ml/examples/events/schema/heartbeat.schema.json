@@ -22,7 +22,7 @@
      "additionalProperties": {
       "type": "string"
      },
-     "default": {},
+     "description": "{\"fall\": \"on\", \"fire\": \"off: нет весов ...\"}",
      "title": "Rules",
      "type": "object"
     }
@@ -36,6 +36,7 @@
   }
  },
  "additionalProperties": false,
+ "description": "Статус узла: раз в 5 с QoS 0, без retain. Last Will (QoS 1) — status offline без sent_at;\nwill от старого run_id BE игнорирует.",
  "properties": {
   "schema_version": {
    "const": "1.0",
@@ -68,6 +69,7 @@
   "sent_at": {
    "anyOf": [
     {
+     "description": "UTC, ISO 8601 с миллисекундами и Z: 2026-11-21T05:15:32.480Z",
      "format": "date-time",
      "type": "string"
     },
@@ -92,15 +94,29 @@
    "title": "Model Version"
   },
   "cameras": {
-   "default": [],
    "items": {
     "$ref": "#/$defs/CameraStatus"
    },
    "title": "Cameras",
    "type": "array"
+  },
+  "dropped_stale": {
+   "anyOf": [
+    {
+     "description": "сколько событий/участников с запуска не отправлено: старше mqtt.max_age_s после долгой недоступности",
+     "minimum": 0,
+     "type": "integer"
+    },
+    {
+     "type": "null"
+    }
+   ],
+   "default": null,
+   "title": "Dropped Stale"
   }
  },
  "required": [
+  "schema_version",
   "node_id",
   "run_id",
   "status"

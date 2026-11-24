@@ -2,7 +2,7 @@
  "_why_invalid": "online без sent_at",
  "schema_version": "1.0",
  "node_id": "ml-node-1",
- "run_id": "ml-20261121-0501",
+ "run_id": "ml-node-1-20261121T050112Z-7f3a",
  "status": "online",
  "model_version": "ml-0.1.0/yolo26n-det-1.0.0/yolo26n-pose-1.0.0/bytetrack-1.0",
  "cameras": [
@@ -21,5 +21,6 @@
     "fire": "off: нет весов (обучение — Фаза 3.1)"
    }
   }
- ]
+ ],
+ "dropped_stale": 0
 }

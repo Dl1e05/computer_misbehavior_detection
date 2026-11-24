@@ -1,4 +1,4 @@
-# Веса и конфигурация узла ML — 2026-11-25 01:18
+# Веса и конфигурация узла ML — 2026-11-25 01:32
 
 Артефакт ТЗ 5.3. Собрано `scripts/export_config_report.py` из `weights/`, `configs/` и окружения.
 
@@ -28,6 +28,7 @@ rules:
   fall: fall-rule-0.1.0
   fight: fight-heur-0.1.0
   fire: fire-mofn-0.1.0
+  smoke: smoke-mofn-0.1.0
   line_crossing: line-0.1.0
   loitering: loiter-0.1.0
   crowding: crowd-0.1.0
@@ -94,6 +95,8 @@ mqtt:
   heartbeat_s: 5
   outbox: data/outbox.sqlite
   send_proposed: false
+  max_age_s: 600
+  dropped_log: data/outbox_dropped.jsonl
 ```
 
 ## Камеры и правила: `configs/cameras.yaml`
@@ -117,13 +120,16 @@ mqtt:
 | cam-fall | `data/fall1_rgb.avi` | 8 | fall | `{"fall_window_s": 1.0, "drop_ratio": 0.3, "torso_angle_deg": 60, "aspect_ratio": 1.0, "still_s": 3.0, "still_motion": 0.05, "get_up_s": 0.5, "kpt_conf": 0.5}` |
 | cam-rtsp | `rtsp://localhost:8554/cam1` | 8 | — | `{}` |
 
-## Зоны: `configs/zones.json`
+## Зоны и линии: `configs/zones.json`
 
-| зона | камера | версия | активна | вершин |
-|---|---|---|---|---|
-| zone-1 | cam-01 | 1 | True | 4 |
-| zone-hall | cam-01 | 1 | True | 4 |
-| zone-1-night | cam-01 | 1 | True | 4 |
+Часовой пояс расписаний: Asia/Almaty
+
+| имя | id (UUID) | тип | камера | версия | активна | точек | расписание |
+|---|---|---|---|---|---|---|---|
+| zone-1 | `fbbdb037-4023-57e9-957c-75ce21f0822b` | зона | cam-01 | 1 | True | 4 | "" |
+| zone-hall | `02354e71-a2d5-53c5-b706-4649b1be54fe` | зона | cam-01 | 1 | True | 4 | "" |
+| zone-1-night | `5e832400-e004-55aa-9b46-1fd6178ad8c7` | зона | cam-01 | 1 | True | 4 | [{"days": "mon-fri", "from": "22:00", "to": "07:00"}, {"days": "sat,sun", "from": "00:00", "to": "24:00"}] |
+| line-walk-1 | `c16ee1e7-5efb-58f0-a6af-adb38f62b8b0` | линия | cam-01 | 1 | True | 2 | "" |
 
 ## Окружение
 

@@ -1,7 +1,9 @@
 """Зоны и линии камер.
 
-Зона  = {zone_id, camera_id, polygon, version, active, schedule?}
-Линия = {line_id, camera_id, points: [p1, p2], version, active}
+Зона  = {zone_id, name?, camera_id, polygon, version, active, schedule?}
+Линия = {line_id, name?, camera_id, points: [p1, p2], version, active}
+zone_id / line_id — UUID (так их отдаёт cameras-zones, и BE отклоняет другие id); name — человеческое
+имя для конфигов и экрана («zone-1», «дверь-1»). В cameras.yaml правило может сослаться на любое из двух.
 Координаты — доли 0–1 от ширины/высоты кадра, начало в левом верхнем углу (так же отдаёт
 API BE), поэтому смена разрешения потока геометрию не ломает.
 
@@ -17,6 +19,7 @@ API BE), поэтому смена разрешения потока геоме�
 from __future__ import annotations
 
 import json
+import uuid
 from dataclasses import dataclass, field
 from datetime import datetime, time, timedelta, tzinfo
 from pathlib import Path
@@ -26,6 +29,20 @@ from shapely.geometry import Point, Polygon
 from shapely.prepared import prep
 
 DAYS = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"]
+_NS = uuid.UUID("6f1b7d2e-0c4a-4e8b-9a51-3c2d1e0f9a77")      # пространство имён для локальных UUID
+
+
+def new_geometry_id(camera_id: str, name: str) -> str:
+    """Стабильный UUID для локальной зоны/линии (пока нет cameras-zones): одно имя — один id."""
+    return str(uuid.uuid5(_NS, f"{camera_id}/{name}"))
+
+
+def is_uuid(value: str) -> bool:
+    try:
+        uuid.UUID(str(value))
+        return True
+    except ValueError:
+        return False
 
 
 def _parse_days(spec) -> set[int]:
@@ -90,6 +107,7 @@ class Zone:
     active: bool = True
     schedule: list[dict] | None = None
     tz: str | None = None                       # из "timezone" файла; None — пояс машины
+    name: str | None = None
     _shape: object = field(default=None, init=False, repr=False, compare=False)
     _windows: list[Window] = field(default_factory=list, init=False, repr=False, compare=False)
 
@@ -129,6 +147,8 @@ class Zone:
         d = {"zone_id": self.zone_id, "camera_id": self.camera_id,
              "polygon": [list(p) for p in self.polygon],
              "version": self.version, "active": self.active}
+        if self.name:
+            d["name"] = self.name
         if self.schedule:
             d["schedule"] = self.schedule
         return d
@@ -143,6 +163,7 @@ class Line:
     points: list[tuple[float, float]]
     version: int = 1
     active: bool = True
+    name: str | None = None
 
     def __post_init__(self):
         self.points = [(float(x), float(y)) for x, y in self.points]
@@ -170,8 +191,11 @@ class Line:
         return ((x - x1) * dx + (y - y1) * dy) / (dx * dx + dy * dy)
 
     def to_dict(self) -> dict:
-        return {"line_id": self.line_id, "camera_id": self.camera_id, "points": [list(p) for p in self.points],
-                "version": self.version, "active": self.active}
+        d = {"line_id": self.line_id, "camera_id": self.camera_id, "points": [list(p) for p in self.points],
+             "version": self.version, "active": self.active}
+        if self.name:
+            d["name"] = self.name
+        return d
 
 
 def foot_point(bbox, frame_w: int, frame_h: int) -> tuple[float, float]:
@@ -180,8 +204,16 @@ def foot_point(bbox, frame_w: int, frame_h: int) -> tuple[float, float]:
     return ((x1 + x2) / 2 / frame_w, y2 / frame_h)
 
 
+def label(item) -> str:
+    """Что показывать человеку: имя, а если его нет — id."""
+    return item.name or getattr(item, "zone_id", None) or item.line_id
+
+
 def load_zones(path: str | Path) -> dict[str, Zone | Line]:
-    """zones.json -> {id: Zone | Line} (зоны и линии вместе, id уникальны). Нет файла — пусто."""
+    """zones.json -> {UUID: Zone | Line} (зоны и линии вместе). Нет файла — пусто.
+
+    id обязаны быть UUID (контракт с BE); старый файл с id вида «zone-1» — ошибка с подсказкой
+    (scripts/draw_zone.py --migrate переведёт: id -> name, новый UUID)."""
     path = Path(path)
     if not path.exists():
         return {}
@@ -194,7 +226,37 @@ def load_zones(path: str | Path) -> dict[str, Zone | Line]:
         if ln["line_id"] in out:
             raise ValueError(f"id {ln['line_id']} занят зоной")
         out[ln["line_id"]] = Line(**ln)
+    bad = [k for k in out if not is_uuid(k)]
+    if bad:
+        raise ValueError(f"{path}: id зон/линий должны быть UUID (как в cameras-zones): {bad}. "
+                         "Перевести: python scripts/draw_zone.py --migrate")
+    names = [label(x) for x in out.values() if x.name]
+    if len(names) != len(set(names)):
+        raise ValueError(f"{path}: имена зон/линий повторяются: {names}")
     return out
+
+
+def migrate_ids(path: str | Path) -> list[tuple[str, str]]:
+    """Старый zones.json (id вида «zone-1») -> name = старый id, id = стабильный UUID. -> [(старый, новый)]."""
+    path = Path(path)
+    data = json.loads(path.read_text(encoding="utf-8"))
+    changed = []
+    for key, items in (("zone_id", data.get("zones", [])), ("line_id", data.get("lines", []))):
+        for it in items:
+            if not is_uuid(it[key]):
+                old = it[key]
+                it.setdefault("name", old)
+                it[key] = new_geometry_id(it["camera_id"], old)
+                changed.append((old, it[key]))
+    path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+    return changed
+
+
+def find(items: dict, ref: str):
+    """Найти зону/линию по UUID или по имени."""
+    if ref in items:
+        return items[ref]
+    return next((x for x in items.values() if x.name == ref), None)
 
 
 def save_zones(path: str | Path, items: dict[str, Zone | Line], timezone: str | None = None) -> None:

@@ -6,14 +6,19 @@ event_id ставится здесь, один раз: тот же id уходи
 """
 from __future__ import annotations
 
+import secrets
 import uuid
 from datetime import datetime, timezone
 
-from vision.events.schema import Event, EventParticipant, Participant, schema_version_for
+from vision.events.schema import DETAILS, FACE_OK, NO_USABLE_FACE, Event, EventParticipant, Participant, schema_version_for
+
+TOP_LEVEL_EXTRA = {"line_id"}          # из Detection.extra — наверх события; остальное — в details
 
 
-def new_run_id(now: datetime | None = None) -> str:
-    return f"ml-{(now or datetime.now(timezone.utc)):%Y%m%d-%H%M%S}"
+def new_run_id(node_id: str = "ml-node-1", now: datetime | None = None, suffix: str | None = None) -> str:
+    """<node_id>-<UTC ГГГГММДДTЧЧММССZ>-<4 hex>: уникален между узлами и перезапусками в одну секунду."""
+    ts = (now or datetime.now(timezone.utc)).astimezone(timezone.utc)
+    return f"{node_id}-{ts:%Y%m%dT%H%M%SZ}-{suffix or secrets.token_hex(2)}"
 
 
 class ModelVersions:
@@ -47,6 +52,9 @@ class ModelVersions:
 
 
 def event_from_detection(d, run_id: str, model_version: str, event_id: uuid.UUID | None = None) -> Event:
+    extra = dict(getattr(d, "extra", None) or {})
+    top = {k: extra.pop(k) for k in list(extra) if k in TOP_LEVEL_EXTRA}
+    details = extra if (extra or d.incident_type in DETAILS) else None
     return Event(
         schema_version=schema_version_for(d.incident_type),
         event_id=event_id or uuid.uuid4(),
@@ -64,12 +72,17 @@ def event_from_detection(d, run_id: str, model_version: str, event_id: uuid.UUID
         zone_version=d.zone_version,
         episode_id=d.episode_id,
         bbox=tuple(round(v, 4) for v in d.bbox) if d.bbox else None,
-        **(getattr(d, "extra", None) or {}),            # поля новых типов (schema 1.1)
+        details=details,                                  # schema 1.1: своя схема на тип
+        **top,
     )
 
 
 def participant_from(m) -> Participant:
-    """face.participants.ParticipantMessage -> контрактное сообщение."""
+    """face.participants.ParticipantMessage -> контрактное сообщение: "ok" + quality_score или "no_usable_face"."""
+    usable = m.snapshot_quality != NO_USABLE_FACE and m.embedding is not None
     return Participant(event_id=uuid.UUID(m.event_id), camera_id=m.camera_id, track_id=int(m.track_id),
-                       snapshot_ref=m.snapshot_ref, snapshot_quality=m.snapshot_quality,
-                       embedding=m.embedding, embedding_model_version=m.embedding_model_version)
+                       snapshot_ref=m.snapshot_ref if usable else None,
+                       snapshot_quality=FACE_OK if usable else NO_USABLE_FACE,
+                       quality_score=float(m.snapshot_quality) if usable else None,
+                       embedding=m.embedding if usable else None,
+                       embedding_model_version=m.embedding_model_version)

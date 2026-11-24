@@ -1,9 +1,9 @@
 """Правила-плагины. Импорт модуля правила регистрирует его в RULES."""
 from __future__ import annotations
 
-from vision.analytics.zones import Line, Zone
+from vision.analytics.zones import Line, Zone, find
 from vision.rules.base import RULES, Detection, Participant, Rule, RuleContext, register
-from vision.rules import (crowd, fall, fight, fire, line, loitering, lying, running,  # noqa: F401
+from vision.rules import (crowd, fall, fight, fire, line, loitering, lying, running,  # noqa: F401 (fire: fire + smoke)
                           tampering, zone)                                                # — регистрируют правила
 
 
@@ -29,13 +29,14 @@ def build_rules(camera_id: str, rules_cfg: dict | None, zones: dict | None = Non
 
 
 def _resolve(camera_id: str, ids, items: dict, kind: type, what: str) -> list:
-    """Список id из cameras.yaml -> объекты; без списка — все такие объекты этой камеры."""
+    """Список из cameras.yaml (UUID или имя) -> объекты; без списка — все такие объекты этой камеры."""
     if ids is None:
         return [x for x in items.values() if isinstance(x, kind) and x.camera_id == camera_id]
-    missing = [i for i in ids if not isinstance(items.get(i), kind)]
+    found = {i: find(items, i) for i in ids}
+    missing = [i for i, x in found.items() if not isinstance(x, kind)]
     if missing:
         raise ValueError(f"камера {camera_id}: нет {what} {missing} в zones.json")
-    return [items[i] for i in ids]
+    return list(found.values())
 
 
 def required_inputs(rules: list[Rule]) -> set[str]:

@@ -2,7 +2,7 @@
   "timezone": "Asia/Almaty",
   "zones": [
     {
-      "zone_id": "zone-1",
+      "zone_id": "fbbdb037-4023-57e9-957c-75ce21f0822b",
       "camera_id": "cam-01",
       "polygon": [
         [
@@ -23,10 +23,11 @@
         ]
       ],
       "version": 1,
-      "active": true
+      "active": true,
+      "name": "zone-1"
     },
     {
-      "zone_id": "zone-hall",
+      "zone_id": "02354e71-a2d5-53c5-b706-4649b1be54fe",
       "camera_id": "cam-01",
       "polygon": [
         [
@@ -47,10 +48,11 @@
         ]
       ],
       "version": 1,
-      "active": true
+      "active": true,
+      "name": "zone-hall"
     },
     {
-      "zone_id": "zone-1-night",
+      "zone_id": "5e832400-e004-55aa-9b46-1fd6178ad8c7",
       "camera_id": "cam-01",
       "polygon": [
         [
@@ -83,12 +85,13 @@
           "from": "00:00",
           "to": "24:00"
         }
-      ]
+      ],
+      "name": "zone-1-night"
     }
   ],
   "lines": [
     {
-      "line_id": "line-walk-1",
+      "line_id": "c16ee1e7-5efb-58f0-a6af-adb38f62b8b0",
       "camera_id": "cam-01",
       "points": [
         [
@@ -101,7 +104,8 @@
         ]
       ],
       "version": 1,
-      "active": true
+      "active": true,
+      "name": "line-walk-1"
     }
   ]
 }

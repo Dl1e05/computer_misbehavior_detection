@@ -20,7 +20,9 @@
   }
  ],
  "model_version": "ml-0.1.0/yolo26n-det-1.0.0/bytetrack-1.0/line-0.1.0",
- "run_id": "ml-20261121-0501",
- "line_id": "line-door-1",
- "direction": "in"
+ "run_id": "ml-node-1-20261121T050112Z-7f3a",
+ "line_id": "c3e5a7b9-2d4f-4061-8a3c-5e7f9b1d3a52",
+ "details": {
+  "direction": "in"
+ }
 }

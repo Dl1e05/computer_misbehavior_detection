@@ -172,9 +172,11 @@ class Pipeline:
             self.status.set_rule(c, "faces", f"on ({service.model_version})")
 
     def _init_publisher(self, enabled: bool) -> None:
-        self.run_id = new_run_id()
+        self.run_id = new_run_id(self.status.node_id)
         self.versions = ModelVersions(self.app.get("versions", {}))
         cfg = dict(self.app.get("mqtt", {}))
+        if cfg.get("dropped_log"):
+            cfg["dropped_log"] = str(self.root / cfg["dropped_log"])
         self.send_proposed = bool(cfg.get("send_proposed", False))
         self.publisher = None
         if enabled and cfg.get("enabled", True):

@@ -27,7 +27,8 @@ from vision.events.schema import TOPIC_PREFIX, message_kind, parse  # noqa: E402
 def short(kind: str, d: dict) -> str:
     if kind == "event":
         ps = ",".join(str(p["track_id"]) for p in d.get("participants", []))
-        extra = d.get("zone_id") or d.get("episode_id") or (d.get("bbox") and f"bbox={d['bbox']}") or ""
+        extra = " ".join(str(x) for x in (d.get("zone_id"), d.get("line_id"), d.get("episode_id"),
+                                          d.get("bbox") and f"bbox={d['bbox']}", d.get("details")) if x)
         return (f"{d['incident_type']}/{d['event_type']} cam={d['camera_id']} conf={d['confidence']} "
                 f"tracks=[{ps}] {extra} id={d['event_id'][:8]}")
     if kind == "participant":

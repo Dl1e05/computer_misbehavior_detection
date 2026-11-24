@@ -5,7 +5,9 @@
 
 - payload хранится байтами: повтор = те же байты (BE дедуплицирует по хэшу, ключ — event_id);
 - key уникален (event_id или event_id:track_id): одно и то же сообщение дважды не встанет;
-- порядок отправки = порядок записи (event раньше своего participant).
+- порядок отправки = порядок записи (event раньше своего participant);
+- срок жизни: после долгой недоступности брокера старое сообщение не отправляется (тревога
+  о событии часовой давности вредна) — expire() удаляет его и возвращает для локального журнала.
 """
 from __future__ import annotations
 
@@ -23,6 +25,7 @@ class OutboxItem:
     payload: bytes
     key: str
     attempts: int
+    created_at: float = 0.0
 
 
 class Outbox:
@@ -53,10 +56,21 @@ class Outbox:
     def pending(self, limit: int = 100, exclude: set[int] | None = None) -> list[OutboxItem]:
         with self._lock:
             rows = self._db.execute(
-                "SELECT id, topic, payload, key, attempts FROM outbox ORDER BY id LIMIT ?",
+                "SELECT id, topic, payload, key, attempts, created_at FROM outbox ORDER BY id LIMIT ?",
                 (limit + len(exclude or ()),)).fetchall()
-        items = [OutboxItem(r[0], r[1], bytes(r[2]), r[3], r[4]) for r in rows]
+        items = [OutboxItem(r[0], r[1], bytes(r[2]), r[3], r[4], r[5]) for r in rows]
         return [i for i in items if not exclude or i.id not in exclude][:limit]
+
+    def expire(self, max_age_s: float, now: float | None = None, keep: set[int] | None = None) -> list[OutboxItem]:
+        """Удалить сообщения старше max_age_s (кроме keep — уже у брокера в пути). -> удалённые."""
+        cutoff = (now if now is not None else time.time()) - max_age_s
+        with self._lock:
+            rows = self._db.execute(
+                "SELECT id, topic, payload, key, attempts, created_at FROM outbox WHERE created_at < ? ORDER BY id",
+                (cutoff,)).fetchall()
+            old = [OutboxItem(r[0], r[1], bytes(r[2]), r[3], r[4], r[5]) for r in rows if r[0] not in (keep or ())]
+            self._db.executemany("DELETE FROM outbox WHERE id = ?", [(i.id,) for i in old])
+        return old
 
     def mark_attempt(self, item_id: int) -> None:
         with self._lock:

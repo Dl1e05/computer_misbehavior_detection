@@ -17,7 +17,8 @@ from vision.rules import RULES, RuleContext, build_rules
 
 W, H, FPS = 1000, 1000, 8
 T0 = datetime(2026, 11, 27, 12, 0, tzinfo=timezone.utc)          # пятница
-ZONE = Zone("z", "cam", [(0.2, 0.2), (0.8, 0.2), (0.8, 0.8), (0.2, 0.8)])
+ZID = "0f8e7d6c-5b4a-4392-8170-6e5d4c3b2a19"                       # UUID, как из cameras-zones
+ZONE = Zone(ZID, "cam", [(0.2, 0.2), (0.8, 0.2), (0.8, 0.8), (0.2, 0.8)], name="z")
 
 
 def person(tid, cx, foot_y, h=200, w=80, conf=0.9):
@@ -63,22 +64,25 @@ def test_zone_intrusion_fires_when_schedule_starts_with_person_inside():
 
 def test_geometry_file_roundtrip_with_lines_and_timezone(tmp_path):
     path = tmp_path / "zones.json"
-    items = {"z": Zone("z", "cam", ZONE.polygon, schedule=[{"days": "sat,sun", "from": "00:00", "to": "24:00"}]),
-             "l": Line("l", "cam", [(0.1, 0.5), (0.9, 0.5)])}
+    lid = "1a2b3c4d-5e6f-4a7b-8c9d-0e1f2a3b4c5d"
+    items = {ZID: Zone(ZID, "cam", ZONE.polygon, name="z",
+                       schedule=[{"days": "sat,sun", "from": "00:00", "to": "24:00"}]),
+             lid: Line(lid, "cam", [(0.1, 0.5), (0.9, 0.5)], name="l")}
     save_zones(path, items, timezone="Asia/Almaty")
     data = json.loads(path.read_text(encoding="utf-8"))
-    assert data["timezone"] == "Asia/Almaty" and data["lines"][0]["line_id"] == "l"
+    assert data["timezone"] == "Asia/Almaty" and data["lines"][0]["line_id"] == lid and data["lines"][0]["name"] == "l"
     back = load_zones(path)
-    assert isinstance(back["l"], Line) and back["z"].tz == "Asia/Almaty"
-    rules = build_rules("cam", {"line_crossing": {}, "zone_intrusion": {}}, back)
-    assert rules[0].lines.keys() == {"l"} and rules[1].zones.keys() == {"z"}
+    assert isinstance(back[lid], Line) and back[ZID].tz == "Asia/Almaty"
+    rules = build_rules("cam", {"line_crossing": {"lines": ["l"]}, "zone_intrusion": {}}, back)
+    assert rules[0].lines.keys() == {lid} and rules[1].zones.keys() == {ZID}
     with pytest.raises(ValueError):
         build_rules("cam", {"line_crossing": {"lines": ["z"]}}, back)              # зона — не линия
 
 
 # ---------- линия ----------
 
-VLINE = Line("door", "cam", [(0.5, 0.0), (0.5, 1.0)])     # сверху вниз: «справа» — это левая часть кадра
+LID = "9e8d7c6b-5a49-4382-a716-05f4e3d2c1b0"
+VLINE = Line(LID, "cam", [(0.5, 0.0), (0.5, 1.0)], name="door")     # сверху вниз: «справа» — это левая часть кадра
 
 
 def walk_x(xs, tid=1, foot_y=600):
@@ -90,7 +94,8 @@ def test_line_crossing_both_directions():
     ev = run(rule, walk_x(list(range(800, 199, -40)) + [200] * 8 + list(range(200, 801, 40)) + [800] * 8))
     assert [e.extra["direction"] for e in ev] == ["in", "out"]
     e = as_event(ev[0])
-    assert e.schema_version == "1.1" and e.line_id == "door" and not is_agreed("line_crossing")
+    assert e.schema_version == "1.1" and str(e.line_id) == LID and e.details.direction == "in"
+    assert not is_agreed("line_crossing")
 
 
 def test_line_jitter_is_not_crossing():
@@ -100,7 +105,7 @@ def test_line_jitter_is_not_crossing():
 
 
 def test_line_segment_bypass_and_direction_filter():
-    short = Line("s", "cam", [(0.5, 0.2), (0.5, 0.4)])                     # короткий отрезок наверху
+    short = Line("2c3d4e5f-6a7b-4c8d-9e0f-1a2b3c4d5e6f", "cam", [(0.5, 0.2), (0.5, 0.4)])                     # короткий отрезок наверху
     rule = RULES["line_crossing"]("cam", {"lines": [short]})
     assert run(rule, walk_x(range(800, 199, -40), foot_y=900)) == []        # прошёл ниже отрезка
     only_out = RULES["line_crossing"]("cam", {"lines": [VLINE], "direction": "out"})
@@ -117,7 +122,7 @@ def test_loitering_with_short_exits():
     ev = run(rule, frames)
     assert len(ev) == 1 and 60 <= ev[0].extra["dwell_s"] < 62
     e = as_event(ev[0])
-    assert e.zone_id == "z" and e.dwell_s >= 60
+    assert str(e.zone_id) == ZID and e.details.dwell_s >= 60
 
 
 def test_loitering_resets_after_long_exit():
@@ -138,7 +143,7 @@ def test_crowding_once_and_rearm():
     frames = [crowd(9)] * (7 * FPS) + [crowd(3)] * (11 * FPS) + [crowd(9)] * (6 * FPS)
     ev = run(rule, frames)
     assert len(ev) == 2 and ev[0].extra["count"] == 9
-    assert as_event(ev[0]).count == 9
+    assert as_event(ev[0]).details.count == 9
 
 
 def test_crowding_short_spike_ignored():
@@ -158,7 +163,7 @@ def test_running_vs_walking():
     assert run(RULES["running"]("cam", {}), move(0.8, 6)) == []             # шаг
     ev = run(RULES["running"]("cam", {}), move(2.5, 4))                    # бег
     assert len(ev) == 1 and ev[0].extra["speed"] >= 2.0
-    assert as_event(ev[0]).speed >= 2.0
+    assert as_event(ev[0]).details.speed >= 2.0
 
 
 def test_running_single_jump_ignored():
@@ -225,7 +230,7 @@ def test_tampering_kinds(kind, make):
     ev = tamper_run(rule, [bad] * (5 * FPS), t0=T0 + timedelta(seconds=8))
     assert [e.extra["tamper_type"] for e in ev] == [kind]
     e = as_event(ev[0])
-    assert e.participants == [] and e.tamper_type == kind
+    assert e.participants == [] and e.details.tamper_type == kind
 
 
 def test_tampering_short_obstruction_and_person_ignored():

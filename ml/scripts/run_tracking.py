@@ -29,7 +29,7 @@ import yaml
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
-from vision.analytics.zones import foot_point, load_zones  # noqa: E402
+from vision.analytics.zones import foot_point, label, load_zones  # noqa: E402
 from vision.runtime.bus import FrameBus  # noqa: E402
 from vision.runtime.pipeline import Pipeline  # noqa: E402
 
@@ -57,14 +57,14 @@ def draw(img: np.ndarray, cam_id: str, ts: str, tracks, zones=(), alert_ids=(),
         mx, my, dx, dy = (x1 + x2) // 2, (y1 + y2) // 2, x2 - x1, y2 - y1
         n = max((dx * dx + dy * dy) ** 0.5, 1)
         cv2.arrowedLine(img, (mx, my), (int(mx - dy / n * 40), int(my + dx / n * 40)), (255, 200, 0), 2)
-        cv2.putText(img, ln.line_id, (x1, y1 - 8), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255, 200, 0), 2)
+        cv2.putText(img, label(ln), (x1, y1 - 8), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255, 200, 0), 2)
     for z in zones:
         pts = np.array([(x * w, y * h) for x, y in z.polygon], np.int32)
         overlay = img.copy()
         cv2.fillPoly(overlay, [pts], (0, 0, 255))
         img = cv2.addWeighted(overlay, 0.2, img, 0.8, 0)
         cv2.polylines(img, [pts], True, (0, 0, 255), 3)
-        cv2.putText(img, z.zone_id, tuple(pts[0]), cv2.FONT_HERSHEY_SIMPLEX, 0.9, (0, 0, 255), 2)
+        cv2.putText(img, label(z), tuple(pts[0]), cv2.FONT_HERSHEY_SIMPLEX, 0.9, (0, 0, 255), 2)
     for t in tracks:
         x1, y1, x2, y2 = map(int, t.bbox)
         c = color(t.track_id)

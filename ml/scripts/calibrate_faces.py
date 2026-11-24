@@ -9,6 +9,11 @@
    порогов, EER, пороги при FAR 1% и 0.1%.
 3. Опознание как у BE: у людей с >= 4 фото первые 3 — «База лиц», остальные — запросы;
    лучшее сходство с базой -> кандидат или «совпадений нет» при выбранном пороге.
+4. Порог НА ПОИСК (замечание BE 25.11): 0.1% ложных на пару — это ~9.5% ложных кандидатов при поиске
+   по 100 людям и ~63% по 1000. Поэтому для Базы из N человек меряем прямо поиск: чужой (его нет в
+   Базе) сравнивается со всеми N — ложный кандидат, если лучшее сходство >= порога. Для N из
+   --search-sizes находим порог, при котором ложных кандидатов на поиск <= --search-fmr, и сколько
+   при нём своих не узнаём (FNIR). Повтор на нескольких случайных Базах.
 Итог — reports/faces/<name>_calibration.json и .png.
 
 ВАЖНО: порог на LFW (фото знаменитостей, крупно и резко) — только проверка, что сервис
@@ -80,12 +85,69 @@ def best_threshold(sims, same, grid):
     return float(grid[int(np.argmax(acc))])
 
 
+def search_thresholds(emb: dict, files: list[str], sizes: list[int], targets: list[float], repeats: int,
+                      pair_curve: list) -> list[dict]:
+    """Порог на поиск по Базе из N человек (по 1 фото на человека — худший случай для своих).
+
+    Своих запросов — другие фото людей из Базы; чужих — фото людей, которых в Базе нет.
+    """
+    by_person: dict[str, list[str]] = defaultdict(list)
+    for f in files:
+        if f in emb:
+            by_person[f.split("/")[0]].append(f)
+    multi = sorted(pid for pid, fs in by_person.items() if len(fs) >= 2)
+    grid = np.round(np.arange(0.0, 0.9, 0.005), 3)
+    out = []
+    for n in sizes:
+        if n > len(multi):
+            out.append({"N": n, "note": f"в датасете только {len(multi)} человек с >= 2 фото"})
+            continue
+        rows = []
+        for rep in range(repeats):
+            rng = np.random.default_rng(1000 + rep)
+            gallery = list(rng.choice(multi, size=n, replace=False))
+            gset = set(gallery)
+            g = np.stack([emb[by_person[pid][0]] for pid in gallery])
+            genuine = [(pid, f) for pid in gallery for f in by_person[pid][1:]]
+            strangers = [fs[0] for pid, fs in by_person.items() if pid not in gset]
+            strangers = list(rng.choice(strangers, size=min(3000, len(strangers)), replace=False))
+            imp_best = (np.stack([emb[f] for f in strangers]) @ g.T).max(axis=1)
+            gen_sims = np.stack([emb[f] for _, f in genuine]) @ g.T
+            gen_top = gen_sims.argmax(axis=1)
+            gen_ok = np.array([gallery[i] == pid for i, (pid, _) in zip(gen_top, genuine)])
+            gen_best = gen_sims.max(axis=1)
+            for t in grid:
+                fmr = float((imp_best >= t).mean())
+                fnir = float(1 - (gen_ok & (gen_best >= t)).mean())
+                rows.append((rep, float(t), fmr, fnir))
+        res = {"N": n, "gallery_photos_per_person": 1, "repeats": repeats}
+        arr = np.array(rows)
+        for target in targets:
+            per_rep = []
+            for rep in range(repeats):
+                r = arr[arr[:, 0] == rep]
+                ok = r[r[:, 2] <= target]
+                per_rep.append(ok[0] if len(ok) else r[-1])
+            thr = float(np.max([x[1] for x in per_rep]))            # самый строгий из повторов
+            fnir = float(np.mean([x[3] for x in per_rep]))
+            res[f"search_fmr<={target:g}"] = {"threshold": round(thr, 3), "fnir": round(fnir, 4),
+                                               "strangers": len(strangers)}
+        out.append(res)
+        print(f"  поиск по Базе из {n}: " + ", ".join(
+            f"ложных кандидатов <= {k.split('<=')[1]}: порог {v['threshold']}, своих не узнаём {v['fnir']:.1%}"
+            for k, v in res.items() if k.startswith("search_fmr")), flush=True)
+    return out
+
+
 def main() -> None:
     p = argparse.ArgumentParser()
     p.add_argument("--images", default=str(LFW / "lfw_funneled"))
     p.add_argument("--pairs", default=str(LFW / "pairs.txt"))
     p.add_argument("--name", default="lfw")
     p.add_argument("--gallery", type=int, default=3, help="фото на человека в «Базе лиц» для опознания")
+    p.add_argument("--search-sizes", default="100,500,1000", help="размеры Базы лиц N для порога на поиск")
+    p.add_argument("--search-fmr", default="0.01,0.001", help="допустимая доля ложных кандидатов на поиск")
+    p.add_argument("--repeats", type=int, default=3, help="сколько случайных Баз на каждый N")
     args = p.parse_args()
 
     root = Path(args.images)
@@ -152,6 +214,9 @@ def main() -> None:
                 ident["wrong_at_thr"] += 1
     n_probe = ident["rank1_correct"] + ident["rank1_wrong"]
 
+    search = search_thresholds(emb, all_files, [int(x) for x in args.search_sizes.split(",") if x],
+                               [float(x) for x in args.search_fmr.split(",") if x], args.repeats, curve)
+
     report = {
         "dataset": args.name, "embedding_model_version": service.model_version,
         "images": len(all_files), "embedded": len(emb), "no_usable_face": dict(Counter(reasons.values())),
@@ -172,6 +237,7 @@ def main() -> None:
             "correct_at_thr": ident["correct_at_thr"], "wrong_at_thr": ident["wrong_at_thr"],
             "no_match_at_thr": ident["no_match_at_thr"],
         },
+        "search": search,
         "note": "LFW — проверка работы сервиса; рабочий порог — на своих добровольцах и камерах (M6)",
     }
     (out_dir / f"{args.name}_calibration.json").write_text(json.dumps(report, ensure_ascii=False, indent=1),

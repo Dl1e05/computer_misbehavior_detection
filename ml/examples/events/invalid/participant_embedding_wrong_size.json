@@ -5,7 +5,8 @@
  "camera_id": "cam-01",
  "track_id": 17,
  "snapshot_ref": "faces/cam-01/20261121/0b7c2f0e-5a1d-4c4e-9a43-3f1b6f9d2a10_17.jpg",
- "snapshot_quality": 0.78,
+ "snapshot_quality": "ok",
+ "quality_score": 0.78,
  "embedding": [
   0.048626,
   0.014943,

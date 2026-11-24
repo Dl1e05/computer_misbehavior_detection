@@ -38,5 +38,52 @@
   "wrong_at_thr": 3,
   "no_match_at_thr": 1
  },
+ "search": [
+  {
+   "N": 100,
+   "gallery_photos_per_person": 1,
+   "repeats": 3,
+   "search_fmr<=0.01": {
+    "threshold": 0.26,
+    "fnir": 0.0006,
+    "strangers": 3000
+   },
+   "search_fmr<=0.001": {
+    "threshold": 0.315,
+    "fnir": 0.0019,
+    "strangers": 3000
+   }
+  },
+  {
+   "N": 500,
+   "gallery_photos_per_person": 1,
+   "repeats": 3,
+   "search_fmr<=0.01": {
+    "threshold": 0.3,
+    "fnir": 0.0031,
+    "strangers": 3000
+   },
+   "search_fmr<=0.001": {
+    "threshold": 0.375,
+    "fnir": 0.0056,
+    "strangers": 3000
+   }
+  },
+  {
+   "N": 1000,
+   "gallery_photos_per_person": 1,
+   "repeats": 3,
+   "search_fmr<=0.01": {
+    "threshold": 0.315,
+    "fnir": 0.0031,
+    "strangers": 3000
+   },
+   "search_fmr<=0.001": {
+    "threshold": 0.69,
+    "fnir": 0.2547,
+    "strangers": 3000
+   }
+  }
+ ],
  "note": "LFW — проверка работы сервиса; рабочий порог — на своих добровольцах и камерах (M6)"
 }

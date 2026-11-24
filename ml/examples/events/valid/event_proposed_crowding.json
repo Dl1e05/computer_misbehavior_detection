@@ -29,8 +29,10 @@
   }
  ],
  "model_version": "ml-0.1.0/yolo26n-det-1.0.0/bytetrack-1.0/crowd-0.1.0",
- "run_id": "ml-20261121-0501",
- "zone_id": "zone-hall",
+ "run_id": "ml-node-1-20261121T050112Z-7f3a",
+ "zone_id": "8a4d2b6e-1f3c-4e9a-b7d5-0c2e4f6a8b91",
  "zone_version": 1,
- "count": 9
+ "details": {
+  "count": 9
+ }
 }

@@ -14,7 +14,7 @@ import textwrap
 import threading
 import time
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import pytest
@@ -101,9 +101,10 @@ VERSIONS = ModelVersions({"ml": "0.1.0", "detector": "yolo26n-det-1.0.0", "pose"
 def test_event_from_rule_detection():
     d = Detection("fight", "confirmation", "cam-01", T, 0.74,
                   [RuleParticipant(3, (0.1, 0.2, 0.3, 0.9), 0.91)], episode_id="cam-01:x:1")
-    run = new_run_id(T)
+    run = new_run_id("ml-node-1", T, "ab12")
     e = event_from_detection(d, run, VERSIONS.for_incident("fight", {"persons", "poses"}))
-    assert run == "ml-20261124-100000"
+    assert run == "ml-node-1-20261124T100000Z-ab12"
+    assert new_run_id("ml-node-1", T) != new_run_id("ml-node-1", T)          # случайный хвост
     out = json.loads(e.to_bytes())
     assert out["model_version"] == "ml-0.1.0/yolo26n-det-1.0.0/bytetrack-1.0/yolo26n-pose-1.0.0/fight-heur-0.1.0"
     assert out["occurred_at"] == "2026-11-24T10:00:00.123Z"
@@ -172,7 +173,10 @@ class FakeClient:
         self.will = (topic, payload, qos, retain)
 
     def publish(self, topic, payload, qos, retain):
-        assert qos == 1 and retain is False
+        assert retain is False
+        hb = topic.endswith("/heartbeat")
+        offline = hb and b'"offline"' in payload
+        assert qos == (0 if hb and not offline else 1)        # heartbeat — QoS 0, события и offline — QoS 1
         if not self.up:
             return FakeInfo(0, rc=4)
         self.mid += 1
@@ -369,3 +373,93 @@ def test_real_broker_last_will_when_process_killed(tmp_path):
         lst.close()
     will = parse("heartbeat", next(p for _, p in lst.msgs if parse("heartbeat", p).status == "offline"))
     assert will.run_id == "run-kill" and will.sent_at is None
+
+
+
+# ---------- правки по ответу BE (25.11) ----------
+
+def test_json_schema_has_ranges_required_version_and_embedding_length():
+    from vision.events.schema import json_schemas
+
+    s = json_schemas()
+    assert all("schema_version" in s[k]["required"] for k in ("event", "participant", "heartbeat"))
+    bbox = s["event"]["$defs"]["EventParticipant"]["properties"]["bbox"]
+    assert all(it["minimum"] == 0 and it["maximum"] == 1 for it in bbox["prefixItems"])
+    emb = s["participant"]["properties"]["embedding"]["anyOf"][0]
+    assert emb["minItems"] == emb["maxItems"] == 512
+    assert s["event"]["properties"]["zone_id"]["anyOf"][0]["format"] == "uuid"
+
+
+def test_example_embedding_is_synthetic_unit_vector():
+    import numpy as np
+
+    face = json.loads((EXAMPLES / "valid" / "participant_face.json").read_text(encoding="utf-8"))
+    assert face["snapshot_quality"] == "ok" and 0 <= face["quality_score"] <= 1
+    assert abs(np.linalg.norm(face["embedding"]) - 1) < 1e-3
+
+
+def test_participant_from_collector_maps_quality():
+    eid = str(uuid.uuid4())
+    vec = [1.0] + [0.0] * 511
+    ok = participant_from(ParticipantMessage(eid, "cam-01", 3, f"faces/cam-01/20261124/{eid}_3.jpg", 0.71, vec, "v1"))
+    assert (ok.snapshot_quality, ok.quality_score) == ("ok", 0.71)
+    bad = participant_from(ParticipantMessage(eid, "cam-01", 4, None, "no_usable_face", None, "v1", "too_small"))
+    assert bad.snapshot_quality == "no_usable_face" and bad.quality_score is None
+
+
+def test_new_type_details_from_rule_extra():
+    zid = uuid.uuid4()
+    d = Detection("loitering", "detection", "cam-01", T, 0.8, [RuleParticipant(1, (0.1, 0.1, 0.2, 0.5), 0.8)],
+                  zone_id=str(zid), zone_version=1, extra={"dwell_s": 61.0})
+    out = json.loads(event_from_detection(d, "r", "m").to_bytes())
+    assert out["schema_version"] == "1.1" and out["details"] == {"dwell_s": 61.0} and "dwell_s" not in out
+    ln = Detection("line_crossing", "detection", "cam-01", T, 0.8, [RuleParticipant(1, (0.1, 0.1, 0.2, 0.5), 0.8)],
+                   extra={"line_id": str(zid), "direction": "out"})
+    out = json.loads(event_from_detection(ln, "r", "m").to_bytes())
+    assert out["line_id"] == str(zid) and out["details"] == {"direction": "out"}
+
+
+def test_smoke_is_separate_type_with_bbox():
+    import numpy as np
+
+    from vision.inference.fire import MockFireDetector
+    from vision.rules import RULES, RuleContext
+
+    rule = RULES["smoke"]("cam-03", {})
+    det = MockFireDetector([[(300, 100, 600, 380, 0.7, 0)]] * 6)       # класс 0 — smoke у D-Fire
+    evs = []
+    for i in range(6):
+        evs += rule.update(RuleContext("cam-03", T + timedelta(seconds=i / 3), 1000, 1000, [],
+                                       image=np.zeros((10, 10, 3), np.uint8), fire=det([None])[0],
+                                       fire_names={0: "smoke", 1: "fire"}))
+    assert [e.incident_type for e in evs] == ["smoke"]
+    e = parse("event", event_from_detection(evs[0], "r", "m").to_bytes())
+    assert e.schema_version == "1.1" and e.bbox and e.participants == []
+
+
+def test_outbox_expire_keeps_inflight(tmp_path):
+    ob = Outbox(tmp_path / "o.sqlite")
+    ob.add("t", b"old", "a")
+    ob.add("t", b"sent", "b")
+    ob.add("t", b"new", "c")
+    ids = {i.key: i.id for i in ob.pending()}
+    later = time.time() + 1000
+    old = ob.expire(600, now=later, keep={ids["b"]})                   # «b» уже у брокера — не трогаем
+    assert {i.key for i in old} == {"a", "c"} and [i.key for i in ob.pending()] == ["b"]
+
+
+def test_stale_messages_not_sent_but_logged_and_counted(tmp_path):
+    log = tmp_path / "dropped.jsonl"
+    pub, c = make_pub(tmp_path, max_age_s=0.3, dropped_log=log)
+    pub.start()
+    pub.submit_event(zone_event())                                     # брокера нет
+    time.sleep(1.6)                                                    # дольше max_age_s
+    c.connect()
+    assert wait(lambda: any(t.endswith("/heartbeat") for _, t, _ in c.published))
+    time.sleep(0.3)
+    assert not any(t.endswith("/events") for _, t, _ in c.published)  # старое событие не ушло
+    assert pub.dropped_stale == 1 and len(pub.outbox) == 0
+    assert json.loads(log.read_text(encoding="utf-8").splitlines()[0])["topic"].endswith("/events")
+    hb = parse("heartbeat", next(p for _, t, p in c.published if t.endswith("/heartbeat")))
+    assert hb.dropped_stale == 1
+    pub.stop(flush_timeout=0)

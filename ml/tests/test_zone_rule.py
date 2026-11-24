@@ -139,12 +139,16 @@ def test_zone_validation():
 
 
 def test_zones_json_roundtrip_and_build_rules(tmp_path):
+    from vision.analytics.zones import new_geometry_id
+
     path = tmp_path / "zones.json"
-    save_zones(path, {"zone-1": ZONE})
+    zid = new_geometry_id("cam-01", "zone-1")
+    save_zones(path, {zid: Zone(zid, "cam-01", ZONE.polygon, name="zone-1")})
     zones = load_zones(path)
-    assert zones["zone-1"].polygon == ZONE.polygon
-    rules = build_rules("cam-01", {"zone_intrusion": {"zones": ["zone-1"], "min_inside_s": 0.5}}, zones)
-    assert len(rules) == 1 and list(rules[0].zones) == ["zone-1"]
+    assert zones[zid].polygon == ZONE.polygon and zones[zid].name == "zone-1"
+    rules = build_rules("cam-01", {"zone_intrusion": {"zones": ["zone-1"], "min_inside_s": 0.5}}, zones)  # по имени
+    assert len(rules) == 1 and list(rules[0].zones) == [zid]
+    assert build_rules("cam-01", {"zone_intrusion": {"zones": [zid]}}, zones)[0].zones.keys() == {zid}  # по UUID
     with pytest.raises(ValueError):
         build_rules("cam-01", {"zone_intrusion": {"zones": ["nope"]}}, zones)
     with pytest.raises(ValueError):
@@ -156,3 +160,18 @@ def test_zone_survives_pickle():
     ZONE.contains(0.7, 0.5)                                            # полигон уже построен
     z = pickle.loads(pickle.dumps(ZONE))
     assert z.contains(0.7, 0.5) and not z.contains(0.2, 0.5)
+
+
+def test_zones_file_requires_uuid_and_migrates(tmp_path):
+    import json
+
+    from vision.analytics.zones import is_uuid, migrate_ids
+
+    path = tmp_path / "zones.json"
+    path.write_text(json.dumps({"zones": [ZONE.to_dict()]}), encoding="utf-8")       # старый id «zone-1»
+    with pytest.raises(ValueError, match="UUID"):
+        load_zones(path)
+    (old, new), = migrate_ids(path)
+    assert old == "zone-1" and is_uuid(new)
+    z = load_zones(path)[new]
+    assert z.name == "zone-1" and migrate_ids(path) == []                            # повторно — ничего

@@ -1,6 +1,6 @@
 {
  "additionalProperties": false,
- "description": "Данные лица участника подтверждённого события (отдельный топик .../participants).",
+ "description": "Данные лица участника подтверждённого события (топик .../participants).\nsnapshot_quality \"ok\" — есть snapshot_ref, embedding и quality_score; \"no_usable_face\" — нет ни одного из них.\nЛица — только для zone_intrusion, fall и fight/confirmation (никогда для suspicion и новых типов).",
  "properties": {
   "schema_version": {
    "const": "1.0",
@@ -28,6 +28,7 @@
   "snapshot_ref": {
    "anyOf": [
     {
+     "description": "ключ в хранилище: faces/<camera_id>/<ГГГГММДД UTC>/<event_id>_<track_id>.jpg",
      "maxLength": 512,
      "minLength": 1,
      "type": "string"
@@ -40,6 +41,14 @@
    "title": "Snapshot Ref"
   },
   "snapshot_quality": {
+   "enum": [
+    "ok",
+    "no_usable_face"
+   ],
+   "title": "Snapshot Quality",
+   "type": "string"
+  },
+  "quality_score": {
    "anyOf": [
     {
      "maximum": 1.0,
@@ -47,18 +56,21 @@
      "type": "number"
     },
     {
-     "const": "no_usable_face",
-     "type": "string"
+     "type": "null"
     }
    ],
-   "title": "Snapshot Quality"
+   "default": null,
+   "title": "Quality Score"
   },
   "embedding": {
    "anyOf": [
     {
+     "description": "512 чисел ArcFace, нормирован: длина вектора 1 ± 0.01",
      "items": {
       "type": "number"
      },
+     "maxItems": 512,
+     "minItems": 512,
      "type": "array"
     },
     {
@@ -76,6 +88,7 @@
   }
  },
  "required": [
+  "schema_version",
   "event_id",
   "camera_id",
   "track_id",

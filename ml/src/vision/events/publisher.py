@@ -10,14 +10,21 @@
   Процесс упал -> при следующем старте outbox дошлёт остатки.
 - Last Will: брокер сам публикует {"status": "offline"} в heartbeat-топик, если процесс
   пропал без DISCONNECT. При штатной остановке шлём offline-heartbeat сами.
-- Heartbeat не идёт через outbox: старый статус после перезапуска никому не нужен.
+- Heartbeat не идёт через outbox: старый статус после перезапуска никому не нужен;
+  QoS 0 и без retain (решение BE 25.11) — старые heartbeat не копятся. Last Will и offline
+  при остановке — QoS 1: одно сообщение, терять нельзя.
+- Срок жизни (max_age_s): событие/участник старше — не отправляется (после долгой недоступности
+  брокера тревога о старом событии вредна), а пишется в локальный журнал dropped_log
+  и считается в heartbeat.dropped_stale.
 """
 from __future__ import annotations
 
+import json
 import logging
 import os
 import threading
 import time
+from pathlib import Path
 from datetime import datetime, timezone
 from typing import Callable
 
@@ -40,7 +47,8 @@ class Publisher:
                  username: str | None = None, password: str | None = None, keepalive: int = 10,
                  heartbeat_s: float = 5.0, status_fn: Callable[[], dict] | None = None,
                  model_version: str | None = None, max_inflight: int = 20,
-                 client_factory: Callable[[str], object] = _default_client, tls: bool = False):
+                 client_factory: Callable[[str], object] = _default_client, tls: bool = False,
+                 max_age_s: float = 600.0, dropped_log: str | Path | None = None):
         self.node_id, self.run_id = node_id, run_id
         self.outbox = outbox
         self.host, self.port, self.keepalive = host, port, keepalive
@@ -48,6 +56,10 @@ class Publisher:
         self.status_fn = status_fn
         self.model_version = model_version
         self.max_inflight = max_inflight
+        self.max_age_s = max_age_s
+        self.dropped_log = Path(dropped_log) if dropped_log else None
+        self.dropped_stale = 0
+        self._next_expire = 0.0
         self.hb_topic = topic_heartbeat(node_id)
         self.client = client_factory(f"{node_id}-{run_id}")
         if username:
@@ -77,7 +89,8 @@ class Publisher:
                    username=os.getenv(cfg.get("user_env", "MQTT_USER")) or None,
                    password=os.getenv(cfg.get("password_env", "MQTT_PASS")) or None,
                    keepalive=int(cfg.get("keepalive_s", 10)), heartbeat_s=float(cfg.get("heartbeat_s", 5)),
-                   tls=bool(cfg.get("tls", False)), **kw)
+                   tls=bool(cfg.get("tls", False)), max_age_s=float(cfg.get("max_age_s", 600)),
+                   dropped_log=cfg.get("dropped_log"), **kw)
 
     # ---------- для конвейера ----------
 
@@ -128,6 +141,7 @@ class Publisher:
         while not self._stop.is_set():
             self._wake.wait(timeout=0.2)
             self._wake.clear()
+            self._expire()
             if not self.connected:
                 continue
             now = time.monotonic()
@@ -135,6 +149,27 @@ class Publisher:
                 self._send_heartbeat()
                 next_hb = now + self.heartbeat_s
             self._drain()
+
+    def _expire(self) -> None:
+        """Раз в секунду: выбросить из outbox то, что старше max_age_s (не трогая уже отправленное)."""
+        if self.max_age_s <= 0 or time.monotonic() < self._next_expire:
+            return
+        self._next_expire = time.monotonic() + 1.0
+        with self._lock:
+            busy = set(self._inflight.values())
+        old = self.outbox.expire(self.max_age_s, keep=busy)
+        if not old:
+            return
+        self.dropped_stale += len(old)
+        log.warning("MQTT: %d сообщений старше %.0f с не отправлены (брокер был недоступен) -> %s",
+                    len(old), self.max_age_s, self.dropped_log or "только счётчик")
+        if self.dropped_log:
+            self.dropped_log.parent.mkdir(parents=True, exist_ok=True)
+            with self.dropped_log.open("a", encoding="utf-8") as fh:
+                for it in old:
+                    fh.write(json.dumps({"dropped_at": time.time(), "created_at": it.created_at, "topic": it.topic,
+                                         "key": it.key, "payload": it.payload.decode("utf-8", "replace")},
+                                        ensure_ascii=False) + "\n")
 
     def _drain(self) -> None:
         with self._lock:
@@ -165,7 +200,8 @@ class Publisher:
         hb = Heartbeat(node_id=self.node_id, run_id=self.run_id, status=status,
                        sent_at=datetime.now(timezone.utc) if with_time else None,
                        model_version=self.model_version,
-                       cameras=[CameraStatus(**c) for c in snap.get("cameras", [])])
+                       cameras=[CameraStatus(**c) for c in snap.get("cameras", [])],
+                       dropped_stale=self.dropped_stale if status == "online" else None)
         return hb.to_bytes()
 
     def _send_heartbeat(self) -> None:
@@ -174,7 +210,7 @@ class Publisher:
         except ValueError as e:                    # статус не по контракту — не роняем поток отправки
             log.error("heartbeat не по контракту: %s", e)
             return
-        info = self.client.publish(self.hb_topic, payload, qos=1, retain=False)
+        info = self.client.publish(self.hb_topic, payload, qos=0, retain=False)   # QoS 0: старые не копятся
         if info.rc == 0:
             self.heartbeats += 1
 

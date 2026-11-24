@@ -91,10 +91,13 @@ def main() -> None:
                     if i == 0 else "| | | ")
             L.append(f"{head}| {rule} | `{json.dumps(params or {}, ensure_ascii=False)}` |")
 
-    L += ["", "## Зоны: `configs/zones.json`", "", "| зона | камера | версия | активна | вершин |", "|---|---|---|---|---|"]
-    for z in zones if isinstance(zones, list) else zones.get("zones", []):
-        L.append(f"| {z.get('zone_id')} | {z.get('camera_id')} | {z.get('version')} | {z.get('active', True)} | "
-                 f"{len(z.get('polygon', []))} |")
+    L += ["", "## Зоны и линии: `configs/zones.json`", "",
+          f"Часовой пояс расписаний: {zones.get('timezone', 'пояс машины')}", "",
+          "| имя | id (UUID) | тип | камера | версия | активна | точек | расписание |", "|---|---|---|---|---|---|---|---|"]
+    for kind, key, pts in (("зона", "zone_id", "polygon"), ("линия", "line_id", "points")):
+        for z in zones.get("zones" if kind == "зона" else "lines", []):
+            L.append(f"| {z.get('name', '')} | `{z.get(key)}` | {kind} | {z.get('camera_id')} | {z.get('version')} | "
+                     f"{z.get('active', True)} | {len(z.get(pts, []))} | {json.dumps(z.get('schedule', ''), ensure_ascii=False)} |")
 
     L += ["", "## Окружение", "", f"- Python {platform.python_version()}, {platform.system()} {platform.release()}"]
     try:

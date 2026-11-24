@@ -56,7 +56,7 @@ class FireRule(Rule):
         self.window_runs = int(p.get("window_runs", 5))
         self.min_hits = int(p.get("min_hits", 4))
         self.clear_s = float(p.get("clear_s", 10.0))
-        self.classes = set(p.get("classes", ["fire"]))        # можно ["fire", "smoke"]
+        self.classes = set(p.get("classes", ["fire"]))        # дым — отдельное правило smoke (свой тип события)
         self.min_conf = float(p.get("min_conf", 0.25))
         self.flicker = bool(p.get("flicker", False))
         self.flicker_min = float(p.get("flicker_min", 0.05))  # мин. разброс размера/яркости
@@ -121,3 +121,13 @@ class FireRule(Rule):
         br = np.array([v for _, v in matched if v is not None])
         bright_var = float(br.std()) if br.size >= 2 else 0.0
         return max(area_var, bright_var) >= self.flicker_min
+
+
+@register("smoke")
+class SmokeRule(FireRule):
+    """Дым — отдельный тип события (решение BE 25.11, тот же дисклеймер, что у огня).
+    Та же модель и тот же фильтр M из N, только класс smoke. Важность у BE — критично."""
+    incident_type = "smoke"
+
+    def __init__(self, camera_id: str, params: dict):
+        super().__init__(camera_id, {**params, "classes": params.get("classes", ["smoke"])})

@@ -1,0 +1,13 @@
+{
+ "_why_invalid": "smoke без bbox очага",
+ "schema_version": "1.1",
+ "event_id": "7e5d4a6c-0f1b-4c23-9e4f-5a6b7c8d9ea5",
+ "event_type": "detection",
+ "incident_type": "smoke",
+ "camera_id": "cam-03",
+ "occurred_at": "2026-11-21T05:15:32.480Z",
+ "confidence": 0.66,
+ "participants": [],
+ "model_version": "ml-0.1.0/fire-yolo26n-1.0.0/smoke-mofn-0.1.0",
+ "run_id": "ml-node-1-20261121T050112Z-7f3a"
+}

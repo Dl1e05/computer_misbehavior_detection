@@ -20,6 +20,8 @@
   }
  ],
  "model_version": "ml-0.1.0/tamper-0.1.0",
- "run_id": "ml-20261121-0501",
- "tamper_type": "covered"
+ "run_id": "ml-node-1-20261121T050112Z-7f3a",
+ "details": {
+  "tamper_type": "covered"
+ }
 }

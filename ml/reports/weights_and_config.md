@@ -1,4 +1,4 @@
-# Веса и конфигурация узла ML — 2026-11-25 01:50
+# Веса и конфигурация узла ML — 2026-11-25 02:16
 
 Артефакт ТЗ 5.3. Собрано `scripts/export_config_report.py` из `weights/`, `configs/` и окружения.
 
@@ -37,6 +37,7 @@ rules:
   camera_tampering: tamper-0.1.0
   abandoned_object: objects-0.1.0
   object_taken: objects-0.1.0
+  scene_change: scene-0.1.0
 ```
 
 ## Узел: `configs/app.yaml`
@@ -127,6 +128,7 @@ objects:
 | | | | camera_tampering | `{"hold_s": 3}` |
 | | | | abandoned_object | `{"abandon_s": 30, "attend_s": 5, "near_k": 1.0, "classes": ["backpack", "handbag", "suitcase", "laptop"]}` |
 | | | | object_taken | `{"confirm_s": 2, "same_look": 0.35}` |
+| cam-scene | `data/scene_change_test.mp4` | 8 | scene_change | `{"zones": ["kiosk-shutter"], "min_ratio": 0.25, "hold_s": 5, "person_window_s": 60}` |
 | cam-tamper | `data/tamper_test.mp4` | 8 | camera_tampering | `{}` |
 | cam-fire | `data/fire1.mp4` | 8 | fire | `{"window_runs": 5, "min_hits": 4, "clear_s": 10, "classes": ["fire"], "min_conf": 0.25, "flicker": false, "flicker_min": 0.05}` |
 | cam-nofire | `data/nofire1.mp4` | 8 | fire | `{}` |
@@ -143,6 +145,7 @@ objects:
 | zone-1 | `fbbdb037-4023-57e9-957c-75ce21f0822b` | зона | cam-01 | 1 | True | 4 | "" |
 | zone-hall | `02354e71-a2d5-53c5-b706-4649b1be54fe` | зона | cam-01 | 1 | True | 4 | "" |
 | zone-1-night | `5e832400-e004-55aa-9b46-1fd6178ad8c7` | зона | cam-01 | 1 | True | 4 | [{"days": "mon-fri", "from": "22:00", "to": "07:00"}, {"days": "sat,sun", "from": "00:00", "to": "24:00"}] |
+| kiosk-shutter | `456e9222-6a58-58f5-a0fa-e7f3c5da2c4e` | зона | cam-scene | 1 | True | 4 | "" |
 | line-walk-1 | `c16ee1e7-5efb-58f0-a6af-adb38f62b8b0` | линия | cam-01 | 1 | True | 2 | "" |
 
 ## Окружение

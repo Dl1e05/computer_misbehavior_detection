@@ -85,6 +85,7 @@ versions:                  # model_version события = ml + модели, �
     camera_tampering: tamper-0.1.0
     abandoned_object: objects-0.1.0
     object_taken: objects-0.1.0
+    scene_change: scene-0.1.0
 
 objects:                   # шаг 11, пакет B: предметы ищет тот же детектор (классы COCO), только на камерах с abandoned_object / object_taken
   classes: {24: backpack, 26: handbag, 28: suitcase, 63: laptop}

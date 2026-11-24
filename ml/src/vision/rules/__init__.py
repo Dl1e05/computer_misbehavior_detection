@@ -4,7 +4,7 @@ from __future__ import annotations
 from vision.analytics.zones import Line, Zone, find
 from vision.rules.base import RULES, Detection, Participant, Rule, RuleContext, register
 from vision.rules import (crowd, fall, fight, fire, line, loitering, lying, objects,  # noqa: F401 (fire: fire + smoke)
-                          running, tampering, zone)                                       # — регистрируют правила
+                          running, scene_change, tampering, zone)                         # — регистрируют правила
 
 
 def build_rules(camera_id: str, rules_cfg: dict | None, zones: dict | None = None) -> list[Rule]:

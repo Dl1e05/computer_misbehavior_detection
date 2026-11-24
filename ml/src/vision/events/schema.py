@@ -50,8 +50,9 @@ PROPOSED_EVENT_TYPES: dict[str, set[str]] = {
     "smoke": {"detection"},
     "abandoned_object": {"detection"},
     "object_taken": {"detection"},
+    "scene_change": {"detection"},                                  # определение отправлено BE 25.11
 }
-ZONE_TYPES = {"zone_intrusion", "loitering", "crowding"}           # нужны zone_id + zone_version
+ZONE_TYPES = {"zone_intrusion", "loitering", "crowding", "scene_change"}   # нужны zone_id + zone_version
 FIRE_LIKE = {"fire", "smoke"}                                       # bbox очага, участников нет
 OBJECT_TYPES = {"abandoned_object", "object_taken"}                 # bbox — рамка предмета
 BBOX_TYPES = FIRE_LIKE | OBJECT_TYPES                               # bbox обязателен (и только у них)
@@ -182,19 +183,27 @@ class ObjectTakenDetails(_Msg):
     object_class: ObjectClass
 
 
+class SceneChangeDetails(_Msg):
+    """scene_change: какая доля охраняемой зоны изменилась и через сколько секунд после того,
+    как рядом был человек (сигнал вандализма на проверку)."""
+    change_ratio: Unit
+    seconds_since_person: Annotated[float, Field(ge=0)]
+
+
 DETAILS: dict[str, type[_Msg]] = {
     "line_crossing": LineCrossingDetails, "loitering": LoiteringDetails, "crowding": CrowdingDetails,
     "running": RunningDetails, "camera_tampering": TamperingDetails,
     "abandoned_object": AbandonedObjectDetails, "object_taken": ObjectTakenDetails,
+    "scene_change": SceneChangeDetails,
 }
 Details = Union[LineCrossingDetails, LoiteringDetails, CrowdingDetails, RunningDetails, TamperingDetails,
-                AbandonedObjectDetails, ObjectTakenDetails]
+                AbandonedObjectDetails, ObjectTakenDetails, SceneChangeDetails]
 
 
 class Event(_Msg):
     """Событие ML. Связи полей (проверяет валидатор ML; BE — по этому описанию):
     - event_type: suspicion/confirmation — только у fight; у остальных — detection;
-    - zone_id + zone_version — обязательны у zone_intrusion, loitering, crowding и запрещены у прочих;
+    - zone_id + zone_version — обязательны у zone_intrusion, loitering, crowding, scene_change и запрещены у прочих;
     - episode_id — обязателен у fight и запрещён у прочих;
     - bbox — обязателен у fire и smoke (рамка очага), abandoned_object и object_taken (рамка предмета),
       запрещён у прочих; у fire и smoke participants пустой;

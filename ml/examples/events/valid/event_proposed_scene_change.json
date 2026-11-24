@@ -1,0 +1,29 @@
+{
+ "schema_version": "1.1",
+ "event_id": "ab8f7d9e-3c4e-4f56-8b7c-8d9eafb0c1d8",
+ "event_type": "detection",
+ "incident_type": "scene_change",
+ "camera_id": "cam-04",
+ "occurred_at": "2026-11-21T05:15:32.480Z",
+ "confidence": 0.9,
+ "participants": [
+  {
+   "track_id": 17,
+   "bbox": [
+    0.322,
+    0.167,
+    0.414,
+    0.639
+   ],
+   "confidence": 0.88
+  }
+ ],
+ "model_version": "ml-0.1.0/yolo26n-det-1.0.0/bytetrack-1.0/scene-0.1.0",
+ "run_id": "ml-node-1-20261121T050112Z-7f3a",
+ "zone_id": "2f6e1c9a-4b7d-4a3e-8c12-9d0e5f7a1b34",
+ "zone_version": 1,
+ "details": {
+  "change_ratio": 0.52,
+  "seconds_since_person": 4.0
+ }
+}

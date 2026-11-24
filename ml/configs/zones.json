@@ -74,6 +74,7 @@
       ],
       "version": 1,
       "active": true,
+      "name": "zone-1-night",
       "schedule": [
         {
           "days": "mon-fri",
@@ -85,8 +86,32 @@
           "from": "00:00",
           "to": "24:00"
         }
+      ]
+    },
+    {
+      "zone_id": "456e9222-6a58-58f5-a0fa-e7f3c5da2c4e",
+      "camera_id": "cam-scene",
+      "polygon": [
+        [
+          0.245,
+          0.19
+        ],
+        [
+          0.38,
+          0.19
+        ],
+        [
+          0.38,
+          0.345
+        ],
+        [
+          0.245,
+          0.345
+        ]
       ],
-      "name": "zone-1-night"
+      "version": 1,
+      "active": true,
+      "name": "kiosk-shutter"
     }
   ],
   "lines": [

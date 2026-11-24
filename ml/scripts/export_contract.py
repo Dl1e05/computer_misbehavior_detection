@@ -105,6 +105,11 @@ def valid() -> dict[str, bytes]:
             incident_type="object_taken", camera_id="cam-01", occurred_at=T, confidence=0.7, participants=[P21],
             bbox=(0.47, 0.64, 0.53, 0.70), model_version="ml-0.1.0/yolo26n-det-1.0.0/bytetrack-1.0/objects-0.1.0",
             run_id=RUN, details={"object_class": "backpack"}),
+        "event_proposed_scene_change": Event(
+            schema_version="1.1", event_id=uuid.UUID("ab8f7d9e-3c4e-4f56-8b7c-8d9eafb0c1d8"), event_type="detection",
+            incident_type="scene_change", camera_id="cam-04", occurred_at=T, confidence=0.9, participants=[P17],
+            model_version="ml-0.1.0/yolo26n-det-1.0.0/bytetrack-1.0/scene-0.1.0", run_id=RUN,
+            zone_id=ZONE_3, zone_version=1, details={"change_ratio": 0.52, "seconds_since_person": 4.0}),
         "event_proposed_smoke": Event(
             schema_version="1.1", event_id=uuid.UUID("7e5d4a6c-0f1b-4c23-9e4f-5a6b7c8d9ea5"), event_type="detection",
             incident_type="smoke", camera_id="cam-03", occurred_at=T, confidence=0.66, participants=[],
@@ -154,6 +159,12 @@ def invalid(v: dict[str, dict]) -> dict[str, tuple[dict, str]]:
                                             "zone_intrusion без zone_version"),
         "event_smoke_without_bbox": ({k: x for k, x in v["event_proposed_smoke"].items() if k != "bbox"},
                                      "smoke без bbox очага"),
+        "event_scene_change_without_zone": ({k: x for k, x in v["event_proposed_scene_change"].items()
+                                              if k not in ("zone_id", "zone_version")},
+                                             "scene_change: нужна охраняемая зона"),
+        "event_scene_change_ratio_over_1": ({**v["event_proposed_scene_change"],
+                                             "details": {"change_ratio": 1.5, "seconds_since_person": 4.0}},
+                                            "change_ratio — доля 0–1"),
         "event_object_taken_without_taker": ({**v["event_proposed_object_taken"], "participants": []},
                                              "object_taken: нужен тот, кто унёс"),
         "event_abandoned_without_object_bbox": ({k: x for k, x in v["event_proposed_abandoned_object"].items()

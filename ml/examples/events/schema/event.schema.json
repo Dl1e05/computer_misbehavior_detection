@@ -170,6 +170,29 @@
    "title": "RunningDetails",
    "type": "object"
   },
+  "SceneChangeDetails": {
+   "additionalProperties": false,
+   "description": "scene_change: какая доля охраняемой зоны изменилась и через сколько секунд после того,\nкак рядом был человек (сигнал вандализма на проверку).",
+   "properties": {
+    "change_ratio": {
+     "maximum": 1.0,
+     "minimum": 0.0,
+     "title": "Change Ratio",
+     "type": "number"
+    },
+    "seconds_since_person": {
+     "minimum": 0,
+     "title": "Seconds Since Person",
+     "type": "number"
+    }
+   },
+   "required": [
+    "change_ratio",
+    "seconds_since_person"
+   ],
+   "title": "SceneChangeDetails",
+   "type": "object"
+  },
   "TamperingDetails": {
    "additionalProperties": false,
    "description": "camera_tampering: что случилось с камерой.",
@@ -193,7 +216,7 @@
   }
  },
  "additionalProperties": false,
- "description": "Событие ML. Связи полей (проверяет валидатор ML; BE — по этому описанию):\n- event_type: suspicion/confirmation — только у fight; у остальных — detection;\n- zone_id + zone_version — обязательны у zone_intrusion, loitering, crowding и запрещены у прочих;\n- episode_id — обязателен у fight и запрещён у прочих;\n- bbox — обязателен у fire и smoke (рамка очага), abandoned_object и object_taken (рамка предмета),\n  запрещён у прочих; у fire и smoke participants пустой;\n- participants не пустой у всех, кроме fire, smoke, camera_tampering (пустой) и abandoned_object\n  (может быть пустым: владелец ушёл);\n- schema 1.1 (новые типы): line_id — обязателен у line_crossing; details — по схеме своего типа.",
+ "description": "Событие ML. Связи полей (проверяет валидатор ML; BE — по этому описанию):\n- event_type: suspicion/confirmation — только у fight; у остальных — detection;\n- zone_id + zone_version — обязательны у zone_intrusion, loitering, crowding, scene_change и запрещены у прочих;\n- episode_id — обязателен у fight и запрещён у прочих;\n- bbox — обязателен у fire и smoke (рамка очага), abandoned_object и object_taken (рамка предмета),\n  запрещён у прочих; у fire и smoke participants пустой;\n- participants не пустой у всех, кроме fire, smoke, camera_tampering (пустой) и abandoned_object\n  (может быть пустым: владелец ушёл);\n- schema 1.1 (новые типы): line_id — обязателен у line_crossing; details — по схеме своего типа.",
  "properties": {
   "schema_version": {
    "default": "1.0",
@@ -376,6 +399,9 @@
     },
     {
      "$ref": "#/$defs/ObjectTakenDetails"
+    },
+    {
+     "$ref": "#/$defs/SceneChangeDetails"
     },
     {
      "type": "null"

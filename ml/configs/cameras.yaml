@@ -56,6 +56,16 @@ cameras:
       object_taken:
         confirm_s: 2              # предмет исчез рядом с чужим: ждём, не появится ли снова (заслоняли)
         same_look: 0.35           # насколько похожа одежда, чтобы считать вернувшегося владельцем
+  - id: cam-scene
+    source: data/scene_change_test.mp4   # demo2 + «граффити» на рольставне киоска (scripts/make_scene_change_clip.py)
+    process_fps: 8
+    realtime: true
+    rules:
+      scene_change:
+        zones: [kiosk-shutter]    # охраняемый объект (зона в zones.json)
+        min_ratio: 0.25           # изменилась хотя бы четверть зоны
+        hold_s: 5                 # и так держится 5 с, зону не заслоняют
+        person_window_s: 60       # человек был рядом не раньше, чем за 60 с до изменения
   - id: cam-tamper
     source: data/tamper_test.mp4  # demo2 со вставками: закрыли, расфокус, засветка, разворот (scripts/make_tamper_clip.py)
     process_fps: 8

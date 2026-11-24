@@ -44,11 +44,22 @@ class CameraSecret(TimestampMixin, Base):
     secret_ref: Mapped[str]
 
 
+# True unless some point is not a pair of numbers within 0..1. strict: the
+# default lax mode unwraps arrays, so it would look at numbers, not at points.
+# coalesce: jsonpath errors (polygon is not an array) give NULL, and a NULL
+# CHECK result passes.
+_POLYGON_NORMALIZED = (
+    "coalesce(NOT jsonb_path_exists(polygon, 'strict $[*] ? "
+    '(@.type() != "array" || @.size() != 2 || '
+    'exists (@[*] ? (@.type() != "number" || @ < 0 || @ > 1)))'
+    "', '{}', true), false)"
+)
+
+
 class Zone(EntityMixin, Base):
     __tablename__ = "zones"
     __table_args__ = (
-        CheckConstraint("frame_width > 0", name="frame_width_positive"),
-        CheckConstraint("frame_height > 0", name="frame_height_positive"),
+        CheckConstraint(_POLYGON_NORMALIZED, name="polygon_normalized"),
         CheckConstraint(
             "CASE WHEN jsonb_typeof(polygon) = 'array' "
             "THEN jsonb_array_length(polygon) >= 3 ELSE false END",
@@ -60,10 +71,8 @@ class Zone(EntityMixin, Base):
     # still has zones is refused (default ON DELETE behaviour).
     camera_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("cameras.id"), index=True)
     name: Mapped[str]
-    # List of [x, y] points in pixels of frame_width x frame_height.
+    # List of [x, y] points as fractions of the frame (0..1).
     # MutableList tracks append/replace of points; editing a point in place
-    # (polygon[0][0] = 5) is not tracked, so assign a new point instead.
-    polygon: Mapped[list[list[int]]] = mapped_column(MutableList.as_mutable(JSONB))
-    frame_width: Mapped[int]
-    frame_height: Mapped[int]
+    # (polygon[0][0] = 0.5) is not tracked, so assign a new point instead.
+    polygon: Mapped[list[list[float]]] = mapped_column(MutableList.as_mutable(JSONB))
     active: Mapped[bool] = mapped_column(server_default=text("true"))

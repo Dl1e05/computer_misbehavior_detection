@@ -1,3 +1,4 @@
+import math
 import uuid
 from datetime import UTC, datetime
 
@@ -24,6 +25,7 @@ def make_incident(camera_id: uuid.UUID, **changes: object) -> Incident:
         camera_id=camera_id,
         occurred_at=datetime(2026, 1, 1, tzinfo=UTC),
         created_received_at=datetime(2026, 1, 1, 0, 0, 1, tzinfo=UTC),
+        model_version="test-model-1",
     )
     for name, value in changes.items():
         setattr(incident, name, value)
@@ -173,9 +175,10 @@ async def test_incident_needs_an_existing_camera(db_session: AsyncSession) -> No
 def make_participant(incident_id: uuid.UUID, **changes: object) -> Participant:
     participant = Participant(
         incident_id=incident_id,
-        track_id="track-1",
+        run_id="run-1",
+        track_id=17,
         confidence=0.9,
-        bbox=[412.0, 188.5, 498.0, 402.0],
+        bbox=[0.25, 0.1, 0.5, 0.75],
         model_version="test-model-1",
     )
     for name, value in changes.items():
@@ -196,8 +199,9 @@ async def test_participant_round_trips(
         select(Participant).where(Participant.id == participant_id)
     )
     assert stored is not None
-    # The SRS sample bbox has fractional pixels.
-    assert stored.bbox == [412.0, 188.5, 498.0, 402.0]
+    assert stored.run_id == "run-1"
+    assert stored.track_id == 17
+    assert stored.bbox == [0.25, 0.1, 0.5, 0.75]
     assert stored.confidence == 0.9
     assert stored.snapshot_ref is None
 
@@ -210,14 +214,45 @@ async def test_participant_without_bbox_is_accepted(
     await db_session.flush()
 
 
-async def test_track_is_unique_within_an_incident(
+async def test_track_is_unique_within_an_incident_and_run(
     db_session: AsyncSession, incident_id: uuid.UUID
 ) -> None:
     db_session.add(make_participant(incident_id))
     await db_session.flush()
 
     db_session.add(make_participant(incident_id))
-    with pytest.raises(IntegrityError, match="uq_participants_incident_id_track_id"):
+    with pytest.raises(
+        IntegrityError, match="uq_participants_incident_id_run_id_track_id"
+    ):
+        await db_session.flush()
+
+
+async def test_same_track_in_another_run_is_accepted(
+    db_session: AsyncSession, incident_id: uuid.UUID
+) -> None:
+    # After a restart ML counts tracks from 0 again: another person.
+    db_session.add_all(
+        [
+            make_participant(incident_id),
+            make_participant(incident_id, run_id="run-2"),
+        ]
+    )
+    await db_session.flush()
+
+
+async def test_largest_track_id_is_stored(
+    db_session: AsyncSession, incident_id: uuid.UUID
+) -> None:
+    # The largest track_id the event contract lets through.
+    db_session.add(make_participant(incident_id, track_id=2**63 - 1))
+    await db_session.flush()
+
+
+async def test_participant_needs_a_run_id(
+    db_session: AsyncSession, incident_id: uuid.UUID
+) -> None:
+    db_session.add(make_participant(incident_id, run_id=None))
+    with pytest.raises(IntegrityError, match="run_id"):
         await db_session.flush()
 
 
@@ -244,9 +279,7 @@ async def test_same_track_in_another_incident_is_accepted(
             {"confidence": -0.1}, "ck_participants_confidence_in_range", id="conf < 0"
         ),
         pytest.param(
-            {"bbox": [10.0, 20.0, 100.0]},
-            "ck_participants_bbox_has_4_values",
-            id="3 values",
+            {"track_id": -1}, "ck_participants_track_id_not_negative", id="track < 0"
         ),
     ],
 )
@@ -277,3 +310,95 @@ async def test_participants_are_removed_with_their_incident(
         {"id": incident_id},
     )
     assert remaining == 0
+
+
+@pytest.mark.parametrize(
+    ("bbox", "constraint"),
+    [
+        pytest.param([0.1, 0.1, 0.9], "bbox_", id="3 values"),
+        pytest.param([0.1, 0.1, 0.9, 0.9, 0.9], "bbox_has_4_values", id="5 values"),
+        pytest.param([412.0, 188.5, 498.0, 402.0], "bbox_normalized", id="pixels"),
+        pytest.param([-0.1, 0.1, 0.9, 0.9], "bbox_normalized", id="below 0"),
+        pytest.param([0.1, 0.1, 0.9, 1.1], "bbox_normalized", id="above 1"),
+        pytest.param([0.9, 0.1, 0.1, 0.9], "bbox_normalized", id="x reversed"),
+        pytest.param([0.1, 0.9, 0.9, 0.1], "bbox_normalized", id="y reversed"),
+        pytest.param([0.1, None, 0.9, 0.9], "bbox_normalized", id="null inside"),
+        pytest.param([0.1, 0.1, math.nan, 0.9], "bbox_normalized", id="NaN"),
+    ],
+)
+async def test_invalid_bbox_is_rejected(
+    db_session: AsyncSession,
+    camera_id: uuid.UUID,
+    incident_id: uuid.UUID,
+    bbox: list[float],
+    constraint: str,
+) -> None:
+    for row, table in (
+        (make_participant(incident_id, bbox=bbox), "participants"),
+        (make_incident(camera_id, bbox=bbox), "incidents"),
+    ):
+        with pytest.raises(IntegrityError, match=f"ck_{table}_{constraint}"):
+            async with db_session.begin_nested():
+                db_session.add(row)
+
+
+@pytest.mark.parametrize(
+    "box",
+    [
+        pytest.param([0.0, 0.0, 1.0, 1.0], id="whole frame"),
+        pytest.param([1.0, 0.1, 1.0, 0.9], id="no width"),
+        pytest.param([0.1, 0.5, 0.9, 0.5], id="no height"),
+    ],
+)
+async def test_bbox_limits_are_accepted(
+    db_session: AsyncSession,
+    camera_id: uuid.UUID,
+    incident_id: uuid.UUID,
+    box: list[float],
+) -> None:
+    db_session.add_all(
+        [make_participant(incident_id, bbox=box), make_incident(camera_id, bbox=box)]
+    )
+    await db_session.flush()
+
+
+async def test_fire_keeps_its_detection_data(
+    db_session: AsyncSession, camera_id: uuid.UUID
+) -> None:
+    incident = make_incident(
+        camera_id,
+        incident_type=IncidentType.FIRE,
+        severity=Severity.CRITICAL,
+        model_version="fire-1.0",
+        confidence=0.87,
+        bbox=[0.25, 0.5, 0.5, 0.75],
+        zone_version=3,
+    )
+    db_session.add(incident)
+    await db_session.flush()
+
+    incident_id = incident.id
+    db_session.expire_all()
+    stored = await db_session.get(Incident, incident_id)
+    assert stored is not None
+    assert stored.model_version == "fire-1.0"
+    assert stored.confidence == 0.87
+    assert stored.bbox == [0.25, 0.5, 0.5, 0.75]
+    assert stored.zone_version == 3
+
+
+@pytest.mark.parametrize("confidence", [-0.1, 1.5, math.nan])
+async def test_incident_confidence_must_be_in_range(
+    db_session: AsyncSession, camera_id: uuid.UUID, confidence: float
+) -> None:
+    db_session.add(make_incident(camera_id, confidence=confidence))
+    with pytest.raises(IntegrityError, match="ck_incidents_confidence_in_range"):
+        await db_session.flush()
+
+
+async def test_incident_needs_a_model_version(
+    db_session: AsyncSession, camera_id: uuid.UUID
+) -> None:
+    db_session.add(make_incident(camera_id, model_version=None))
+    with pytest.raises(IntegrityError, match="model_version"):
+        await db_session.flush()

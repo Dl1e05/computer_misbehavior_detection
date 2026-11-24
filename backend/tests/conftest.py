@@ -154,9 +154,7 @@ def make_zone(db_session: AsyncSession) -> MakeZone:
         zone = Zone(
             camera_id=camera_id,
             name="Server room door",
-            polygon=[[10, 10], [200, 10], [200, 150], [10, 150]],
-            frame_width=1920,
-            frame_height=1080,
+            polygon=[[0.1, 0.1], [0.9, 0.1], [0.9, 0.8], [0.1, 0.8]],
         )
         db_session.add(zone)
         await db_session.flush()
@@ -184,6 +182,7 @@ async def incident_id(db_session: AsyncSession, camera_id: uuid.UUID) -> uuid.UU
         camera_id=camera_id,
         occurred_at=datetime(2026, 1, 1, tzinfo=UTC),
         created_received_at=datetime(2026, 1, 1, 0, 0, 1, tzinfo=UTC),
+        model_version="test-model-1",
     )
     db_session.add(incident)
     await db_session.flush()

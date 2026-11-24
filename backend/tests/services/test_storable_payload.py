@@ -22,19 +22,24 @@ def test_plain_object_is_kept() -> None:
     }
 
 
-def test_embeddings_are_removed_at_any_depth() -> None:
+def test_face_data_is_removed_at_any_depth() -> None:
     raw = json.dumps(
         {
             "embedding": [0.1],
             "participants": [
-                {"track_id": "1", "embedding": [0.2], "embedding_model_version": "v1"}
+                {
+                    "track_id": 1,
+                    "embedding": [0.2],
+                    "embedding_model_version": "v1",
+                    "snapshot_ref": "snapshots/1.jpg",
+                }
             ],
-            "extra": {"deeper": [{"embedding": [0.3]}]},
+            "extra": {"deeper": [{"embedding": [0.3], "snapshot_ref": "x"}]},
         }
     ).encode()
 
     assert stored(raw) == {
-        "participants": [{"track_id": "1", "embedding_model_version": "v1"}],
+        "participants": [{"track_id": 1}],
         "extra": {"deeper": [{}]},
     }
 
@@ -46,8 +51,7 @@ def test_embeddings_are_removed_at_any_depth() -> None:
         pytest.param(b"\xff\xfe{}", id="not utf-8"),
         pytest.param(b"[1, 2]", id="array"),
         pytest.param(b'"text"', id="string"),
-        pytest.param(b'{"confidence": NaN}', id="NaN"),
-        pytest.param(b'{"confidence": -Infinity}', id="Infinity"),
+        pytest.param(b'{"n": ' + b"9" * 5000 + b"}", id="huge integer"),
         pytest.param(b'{"a": ' * 100_000 + b"1" + b"}" * 100_000, id="deep nesting"),
     ],
 )
@@ -58,6 +62,8 @@ def test_message_that_is_not_an_object_is_not_loaded(raw: bytes) -> None:
 @pytest.mark.parametrize(
     "raw",
     [
+        pytest.param(b'{"confidence": NaN}', id="NaN"),
+        pytest.param(b'{"confidence": -Infinity}', id="Infinity"),
         pytest.param(b'{"x": 1e400}', id="number overflowing to inf"),
         pytest.param(b'{"x": [-1e400]}', id="number overflowing to -inf"),
         pytest.param(b'{"name": "a\\u0000b"}', id="U+0000 in a value"),

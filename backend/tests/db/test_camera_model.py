@@ -1,7 +1,8 @@
 import uuid
+from typing import Any
 
 import pytest
-from sqlalchemy import select, text
+from sqlalchemy import insert, select, text
 from sqlalchemy.exc import DBAPIError, IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -22,9 +23,7 @@ def make_zone(camera_id: uuid.UUID) -> Zone:
     return Zone(
         camera_id=camera_id,
         name="Server room door",
-        polygon=[[10, 10], [200, 10], [200, 150], [10, 150]],
-        frame_width=1920,
-        frame_height=1080,
+        polygon=[[0.1, 0.1], [0.9, 0.1], [0.9, 0.8], [0.1, 0.8]],
     )
 
 
@@ -75,7 +74,12 @@ async def test_zone_polygon_round_trips(db_session: AsyncSession) -> None:
     db_session.expire_all()
     stored = await db_session.scalar(select(Zone).where(Zone.id == zone_id))
     assert stored is not None
-    assert stored.polygon == [[10, 10], [200, 10], [200, 150], [10, 150]]
+    assert stored.polygon == [
+        [0.1, 0.1],
+        [0.9, 0.1],
+        [0.9, 0.8],
+        [0.1, 0.8],
+    ]
     assert stored.version == 1
     assert stored.active is True
 
@@ -142,7 +146,7 @@ async def test_in_place_json_changes_are_saved(db_session: AsyncSession) -> None
     await db_session.flush()
 
     camera.access_settings["allowed_roles"] = ["OPERATOR"]
-    zone.polygon.append([5, 5])
+    zone.polygon.append([0.5, 0.5])
     await db_session.flush()
 
     camera_id, zone_id = camera.id, zone.id
@@ -158,29 +162,55 @@ async def test_in_place_json_changes_are_saved(db_session: AsyncSession) -> None
 
 
 @pytest.mark.parametrize(
-    ("changes", "constraint"),
+    ("polygon", "constraint"),
     [
-        pytest.param({"frame_width": 0}, "ck_zones_frame_width_positive", id="width 0"),
-        pytest.param(
-            {"frame_height": -1}, "ck_zones_frame_height_positive", id="height < 0"
-        ),
-        pytest.param(
-            {"polygon": [[0, 0], [10, 10]]},
-            "ck_zones_polygon_min_3_points",
-            id="2-point polygon",
-        ),
+        pytest.param([[0, 0], [1, 1]], "ck_zones_polygon_min_3_points", id="2 points"),
+        pytest.param([], "ck_zones_polygon_min_3_points", id="empty"),
+        *[
+            pytest.param(
+                [[0, 0], [1, 0], point], "ck_zones_polygon_normalized", id=str(point)
+            )
+            for point in (
+                [1, 1.5],
+                [-0.1, 1],
+                [960, 540],
+                [1, 1, 1],
+                [1],
+                [],
+                ["1", 1],
+                [None, 1],
+                [True, 1],
+                [[0, 1], 1],
+                0.5,
+                None,
+                {"x": 1, "y": 1},
+            )
+        ],
+        # Either CHECK may report these first.
+        pytest.param({"points": []}, "ck_zones_polygon_", id="object"),
+        pytest.param("square", "ck_zones_polygon_", id="text"),
     ],
 )
 async def test_invalid_zone_geometry_is_rejected(
-    db_session: AsyncSession, changes: dict[str, object], constraint: str
+    db_session: AsyncSession, polygon: Any, constraint: str
 ) -> None:
     camera = make_camera()
     db_session.add(camera)
     await db_session.flush()
 
-    zone = make_zone(camera.id)
-    for name, value in changes.items():
-        setattr(zone, name, value)
-    db_session.add(zone)
+    # Not through the model: MutableList itself refuses what is not a list.
     with pytest.raises(IntegrityError, match=constraint):
-        await db_session.flush()
+        await db_session.execute(
+            insert(Zone).values(camera_id=camera.id, name="Door", polygon=polygon)
+        )
+
+
+async def test_zone_may_touch_the_frame_edges(db_session: AsyncSession) -> None:
+    camera = make_camera()
+    db_session.add(camera)
+    await db_session.flush()
+
+    zone = make_zone(camera.id)
+    zone.polygon = [[0, 0], [1, 0], [1.0, 1.0], [0.0, 1]]
+    db_session.add(zone)
+    await db_session.flush()

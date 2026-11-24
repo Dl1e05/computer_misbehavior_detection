@@ -19,7 +19,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.db.models import AuditEntry, Camera, DeadLetter, ProcessedEvent, Zone
 from app.domain.audit import AuditObjectType, AuditResult
 from app.domain.event import FailureCode
-from app.mqtt.events import EventLimits, MlEvent, Rejection, parse_event
+from app.mqtt.events import (
+    FACE_FIELDS,
+    EventLimits,
+    MlEvent,
+    Rejection,
+    parse_event,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -63,7 +69,7 @@ async def ingest_event(
             payload_hash=payload_hash,
         )
 
-    # V1..V7, V9, V11 (first half), V12..V15.
+    # V1..V7, V9, V11 (first half), V12..V14.
     parsed = parse_event(raw, limits)
     if isinstance(parsed, Rejection):
         return await reject(parsed)
@@ -85,7 +91,7 @@ async def ingest_event(
         )
 
     # V8. Known deviation from the V order: parse_event has already applied
-    # V9 and V11..V15, so an unknown camera next to such a fault is reported
+    # V9 and V11..V14, so an unknown camera next to such a fault is reported
     # as that fault. Handling (§7.5) is the same, only the code differs.
     camera = await session.scalar(select(Camera).where(Camera.code == event.camera_id))
     if camera is None or not camera.enabled:
@@ -162,9 +168,9 @@ async def _reject(
     )
     # §7.5: a privacy violation record in the Audit Log. Decided from the
     # message itself, not from the reported code: with another fault in the
-    # message the code is that fault (V order, or Pydantic skipping the
-    # cross-field rules), but biometric data was still sent.
-    if loaded is not None and _has_embedding_on_suspicion(loaded):
+    # message the code may be that fault (V order), but face data was still
+    # sent.
+    if loaded is not None and _has_face_data(loaded):
         session.add(_privacy_violation(loaded, topic))
     await session.flush()
     # detail never contains input values (see Rejection), so it may be logged.
@@ -178,16 +184,13 @@ async def _reject(
     return IngestOutcome(IngestStatus.REJECTED, code=rejection.code)
 
 
-def _has_embedding_on_suspicion(loaded: dict[str, Any]) -> bool:
+def _has_face_data(loaded: dict[str, Any]) -> bool:
     # The same condition as V14 in MlEvent, read from the unvalidated JSON.
     participants = loaded.get("participants")
-    return (
-        loaded.get("event_type") == "suspicion"
-        and isinstance(participants, list)
-        and any(
-            isinstance(participant, dict) and participant.get("embedding") is not None
-            for participant in participants
-        )
+    return isinstance(participants, list) and any(
+        isinstance(participant, dict)
+        and any(participant.get(field) is not None for field in FACE_FIELDS)
+        for participant in participants
     )
 
 
@@ -237,9 +240,10 @@ def _storable_text(value: object) -> str | None:
 def load_object(raw: bytes) -> dict[str, Any] | None:
     """The message as a JSON object, or None if it is not one."""
     try:
-        loaded = json.loads(raw, parse_constant=_refuse_constant)
+        loaded = json.loads(raw)
     except (ValueError, RecursionError):
-        # Not UTF-8, not JSON, literal NaN/Infinity, or nested too deeply.
+        # Not UTF-8, not JSON, an integer with thousands of digits, or nested
+        # too deeply. NaN and Infinity are loaded; storable_payload refuses them.
         return None
     return loaded if isinstance(loaded, dict) else None
 
@@ -250,15 +254,15 @@ def storable_payload(loaded: dict[str, Any] | None) -> dict[str, Any] | None:
     A dead letter must never fail to save: that would roll back the
     transaction and the message would be redelivered forever. So anything
     Postgres JSONB refuses, or that is too large, becomes None and only the
-    payload hash is kept. Embeddings are removed at any depth (SRS §12.6, §14).
+    payload hash is kept. Face data is removed at any depth (SRS §12.6, §14).
     """
     if loaded is None:
         return None
     try:
-        cleaned: dict[str, Any] = _without_embeddings(loaded)
-        # allow_nan=False: an overflowing number such as 1e400 loads as inf,
-        # which JSONB refuses. Lone surrogates fail to encode as UTF-8.
-        # Both raise a ValueError.
+        cleaned: dict[str, Any] = _without_face_data(loaded)
+        # allow_nan=False: JSONB refuses NaN and Infinity, also the inf that an
+        # overflowing number such as 1e400 loads as. Lone surrogates fail to
+        # encode as UTF-8. Both raise a ValueError.
         encoded = json.dumps(cleaned, ensure_ascii=False, allow_nan=False).encode()
     except (ValueError, RecursionError):
         return None
@@ -269,18 +273,14 @@ def storable_payload(loaded: dict[str, Any] | None) -> dict[str, Any] | None:
     return cleaned
 
 
-def _refuse_constant(name: str) -> Any:
-    raise ValueError(f"{name} is not valid JSON")
-
-
-def _without_embeddings(value: Any) -> Any:
-    # The payload is unvalidated, so embeddings may be anywhere.
+def _without_face_data(value: Any) -> Any:
+    # The payload is unvalidated, so face data may be anywhere.
     if isinstance(value, dict):
         return {
-            key: _without_embeddings(item)
+            key: _without_face_data(item)
             for key, item in value.items()
-            if key != "embedding"
+            if key not in FACE_FIELDS
         }
     if isinstance(value, list):
-        return [_without_embeddings(item) for item in value]
+        return [_without_face_data(item) for item in value]
     return value

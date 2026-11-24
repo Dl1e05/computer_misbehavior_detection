@@ -83,3 +83,12 @@ versions:                  # model_version события = ml + модели, �
     running: run-0.1.0
     lying_motionless: lying-0.1.0
     camera_tampering: tamper-0.1.0
+    abandoned_object: objects-0.1.0
+    object_taken: objects-0.1.0
+
+objects:                   # шаг 11, пакет B: предметы ищет тот же детектор (классы COCO), только на камерах с abandoned_object / object_taken
+  classes: {24: backpack, 26: handbag, 28: suitcase, 63: laptop}
+  tracker:                 # свой ByteTrack для предметов на каждую камеру (поверх раздела tracker)
+    track_thresh: 0.3      # предметы детектор видит увереннее редко — порог старта трека ниже, чем у людей
+    min_hits: 3
+    lost_s: 5.0            # предмет часто заслоняют проходящие люди — помним дольше

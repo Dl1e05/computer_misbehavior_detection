@@ -1,4 +1,4 @@
-# Веса и конфигурация узла ML — 2026-11-25 01:32
+# Веса и конфигурация узла ML — 2026-11-25 01:50
 
 Артефакт ТЗ 5.3. Собрано `scripts/export_config_report.py` из `weights/`, `configs/` и окружения.
 
@@ -35,6 +35,8 @@ rules:
   running: run-0.1.0
   lying_motionless: lying-0.1.0
   camera_tampering: tamper-0.1.0
+  abandoned_object: objects-0.1.0
+  object_taken: objects-0.1.0
 ```
 
 ## Узел: `configs/app.yaml`
@@ -97,6 +99,16 @@ mqtt:
   send_proposed: false
   max_age_s: 600
   dropped_log: data/outbox_dropped.jsonl
+objects:
+  classes:
+    24: backpack
+    26: handbag
+    28: suitcase
+    63: laptop
+  tracker:
+    track_thresh: 0.3
+    min_hits: 3
+    lost_s: 5.0
 ```
 
 ## Камеры и правила: `configs/cameras.yaml`
@@ -113,6 +125,8 @@ mqtt:
 | | | | running | `{"speed": 1.6, "min_s": 1.0}` |
 | | | | lying_motionless | `{"lie_s": 30}` |
 | | | | camera_tampering | `{"hold_s": 3}` |
+| | | | abandoned_object | `{"abandon_s": 30, "attend_s": 5, "near_k": 1.0, "classes": ["backpack", "handbag", "suitcase", "laptop"]}` |
+| | | | object_taken | `{"confirm_s": 2, "same_look": 0.35}` |
 | cam-tamper | `data/tamper_test.mp4` | 8 | camera_tampering | `{}` |
 | cam-fire | `data/fire1.mp4` | 8 | fire | `{"window_runs": 5, "min_hits": 4, "clear_s": 10, "classes": ["fire"], "min_conf": 0.25, "flicker": false, "flicker_min": 0.05}` |
 | cam-nofire | `data/nofire1.mp4` | 8 | fire | `{}` |

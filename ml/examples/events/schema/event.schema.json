@@ -1,5 +1,33 @@
 {
  "$defs": {
+  "AbandonedObjectDetails": {
+   "additionalProperties": false,
+   "description": "abandoned_object: какой предмет и сколько секунд он без присмотра.",
+   "properties": {
+    "object_class": {
+     "enum": [
+      "backpack",
+      "handbag",
+      "suitcase",
+      "laptop",
+      "umbrella"
+     ],
+     "title": "Object Class",
+     "type": "string"
+    },
+    "unattended_s": {
+     "minimum": 0,
+     "title": "Unattended S",
+     "type": "number"
+    }
+   },
+   "required": [
+    "object_class",
+    "unattended_s"
+   ],
+   "title": "AbandonedObjectDetails",
+   "type": "object"
+  },
   "CrowdingDetails": {
    "additionalProperties": false,
    "description": "crowding: сколько людей в зоне на момент события.",
@@ -104,6 +132,28 @@
    "title": "LoiteringDetails",
    "type": "object"
   },
+  "ObjectTakenDetails": {
+   "additionalProperties": false,
+   "description": "object_taken: какой предмет унесли (сигнал на проверку, не доказательство кражи).",
+   "properties": {
+    "object_class": {
+     "enum": [
+      "backpack",
+      "handbag",
+      "suitcase",
+      "laptop",
+      "umbrella"
+     ],
+     "title": "Object Class",
+     "type": "string"
+    }
+   },
+   "required": [
+    "object_class"
+   ],
+   "title": "ObjectTakenDetails",
+   "type": "object"
+  },
   "RunningDetails": {
    "additionalProperties": false,
    "description": "running: скорость в ростах человека в секунду.",
@@ -143,7 +193,7 @@
   }
  },
  "additionalProperties": false,
- "description": "Событие ML. Связи полей (проверяет валидатор ML; BE — по этому описанию):\n- event_type: suspicion/confirmation — только у fight; у остальных — detection;\n- zone_id + zone_version — обязательны у zone_intrusion, loitering, crowding и запрещены у прочих;\n- episode_id — обязателен у fight и запрещён у прочих;\n- bbox — обязателен у fire и smoke (рамка очага) и запрещён у прочих; у них participants пустой;\n- participants не пустой у всех, кроме fire, smoke, camera_tampering;\n- schema 1.1 (новые типы): line_id — обязателен у line_crossing; details — по схеме своего типа.",
+ "description": "Событие ML. Связи полей (проверяет валидатор ML; BE — по этому описанию):\n- event_type: suspicion/confirmation — только у fight; у остальных — detection;\n- zone_id + zone_version — обязательны у zone_intrusion, loitering, crowding и запрещены у прочих;\n- episode_id — обязателен у fight и запрещён у прочих;\n- bbox — обязателен у fire и smoke (рамка очага), abandoned_object и object_taken (рамка предмета),\n  запрещён у прочих; у fire и smoke participants пустой;\n- participants не пустой у всех, кроме fire, smoke, camera_tampering (пустой) и abandoned_object\n  (может быть пустым: владелец ушёл);\n- schema 1.1 (новые типы): line_id — обязателен у line_crossing; details — по схеме своего типа.",
  "properties": {
   "schema_version": {
    "default": "1.0",
@@ -320,6 +370,12 @@
     },
     {
      "$ref": "#/$defs/TamperingDetails"
+    },
+    {
+     "$ref": "#/$defs/AbandonedObjectDetails"
+    },
+    {
+     "$ref": "#/$defs/ObjectTakenDetails"
     },
     {
      "type": "null"

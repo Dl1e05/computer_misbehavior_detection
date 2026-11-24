@@ -55,7 +55,8 @@ class RuleContext:
     tracks: list                               # list[analytics.tracker.Track], bbox в пикселях
     session: int = 0
     poses: Any = None                          # {track_id: (17, 3)} — если правилу нужны poses
-    objects: Any = None
+    objects: Any = None                        # list[Track] предметов (свой трекер), если правилу нужны objects
+    object_names: Any = None                   # {cls: "backpack"/...} — имена классов COCO предметов
     image: Any = None                          # BGR-кадр — для правил/моделей, которым нужна картинка
     fire: Any = None                           # (N, 6) рамки модели огня; None — на этом кадре не запускалась
     fire_names: Any = None                     # {cls: "fire"/"smoke"} — имена классов модели огня

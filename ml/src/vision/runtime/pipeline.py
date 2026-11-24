@@ -25,7 +25,7 @@ from vision.events.schema import is_agreed
 from vision.events.outbox import Outbox
 from vision.events.publisher import Publisher
 from vision.face.participants import FACE_EVENTS, ParticipantCollector
-from vision.inference.detector import BatchDetector
+from vision.inference.detector import PERSON, BatchDetector
 from vision.inference.fire import FireDetector
 from vision.inference.pose import PoseEstimator, attach_poses
 from vision.rules import RuleContext, build_rules, required_inputs
@@ -42,6 +42,7 @@ class FrameOut:
     poses: dict | None
     events: list                                   # контрактные Event этого кадра
     rules: list                                    # правила камеры (для отрисовки зон/фаз)
+    objects: list = field(default_factory=list)    # треки предметов (если камере они нужны)
 
 
 @dataclass
@@ -95,6 +96,7 @@ class Pipeline:
             log.info("camera %s: правила %s", cid, [type(r).__name__ for r in self.rules[cid]])
 
         self._init_models(shared)
+        self._init_objects()
         self._init_faces(faces)
         self._init_publisher(mqtt)
         self._sessions: dict[str, int] = {}
@@ -147,6 +149,19 @@ class Pipeline:
                 self.pose_model = PoseEstimator.from_config(cfg)
                 self.pose_model.warmup(len(self.pose_cams))
 
+    def _init_objects(self) -> None:
+        """Предметы (рюкзак, сумка...) — только для камер, где правилам нужны objects."""
+        cfg = dict(self.app.get("objects", {}))
+        self.object_names = {int(k): v for k, v in (cfg.get("classes") or
+                                                    {24: "backpack", 26: "handbag", 28: "suitcase", 63: "laptop"}).items()}
+        self.object_cams = {c for c, rs in self.rules.items() if "objects" in required_inputs(rs)}
+        self.det_classes = (PERSON,) + (tuple(sorted(self.object_names)) if self.object_cams else ())
+        tcfg = {**self.app["tracker"], **(cfg.get("tracker") or {})}
+        fps = {cam["id"]: cam.get("process_fps", 8) for cam in self.cams}
+        self.object_trackers = {c: CameraTracker.from_config(c, fps[c], tcfg) for c in self.object_cams}
+        if self.object_cams:
+            log.info("предметы %s для камер: %s", sorted(self.object_names.values()), sorted(self.object_cams))
+
     def _init_faces(self, enabled: bool) -> None:
         from vision.face.face_service import FaceService
         from vision.face.storage import LocalSnapshotStorage
@@ -197,7 +212,7 @@ class Pipeline:
         m = self.metrics
         m.batch_size.append(len(batch))
         t0 = time.perf_counter()
-        dets = self.detector([f.image for f in batch])                 # ОДИН прогон на все камеры
+        dets = self.detector([f.image for f in batch], classes=self.det_classes)   # ОДИН прогон на все камеры
         m.det_ms.append((time.perf_counter() - t0) * 1000)
 
         need = [i for i, f in enumerate(batch) if f.camera_id in self.pose_cams]
@@ -230,6 +245,14 @@ class Pipeline:
 
     def _analytics(self, f: Frame, dets, poses_raw, fire) -> FrameOut:
         cid = f.camera_id
+        objects = None
+        if len(dets) and self.object_cams:                             # люди — в трекер людей, предметы — в свой
+            is_person = dets[:, 5] == PERSON
+            if cid in self.object_cams:
+                objects = self.object_trackers[cid].update(dets[~is_person], f.image, session=f.session)
+            dets = dets[is_person]
+        elif cid in self.object_cams:
+            objects = self.object_trackers[cid].update(dets[:0], f.image, session=f.session)
         tracks = self.trackers[cid].update(dets, f.image, session=f.session)
         self.metrics.frames[cid] += 1
         cam_rules = self.rules[cid]
@@ -246,7 +269,8 @@ class Pipeline:
         h, w = f.image.shape[:2]
         poses = attach_poses(tracks, poses_raw, self.match_iou) if poses_raw is not None else None
         ctx = RuleContext(cid, f.ts, w, h, tracks, session=f.session, poses=poses, image=f.image, fire=fire,
-                          fire_names=self.fire_model.names if self.fire_model else None)
+                          fire_names=self.fire_model.names if self.fire_model else None,
+                          objects=objects, object_names=self.object_names)
         events = []
         for r in cam_rules:
             for d in r.update(ctx):
@@ -256,7 +280,7 @@ class Pipeline:
                     events.append(e)
                     if col:
                         col.on_event(d, str(e.event_id))               # сам проверит, подтверждающее ли
-        return FrameOut(f, tracks, poses, events, cam_rules)
+        return FrameOut(f, tracks, poses, events, cam_rules, objects or [])
 
     def _emit_event(self, rule, d):
         try:

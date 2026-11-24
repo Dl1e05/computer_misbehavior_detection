@@ -95,6 +95,16 @@ def valid() -> dict[str, bytes]:
             schema_version="1.1", event_id=uuid.UUID("6d4c3f5b-9e0a-4b12-8d3e-4f5a6b7c8d94"), event_type="detection",
             incident_type="camera_tampering", camera_id="cam-02", occurred_at=T, confidence=0.93, participants=[],
             model_version="ml-0.1.0/tamper-0.1.0", run_id=RUN, details={"tamper_type": "covered"}),
+        "event_proposed_abandoned_object": Event(
+            schema_version="1.1", event_id=uuid.UUID("8f6e5b7d-1a2c-4d34-8f5a-6b7c8d9eafb6"), event_type="detection",
+            incident_type="abandoned_object", camera_id="cam-01", occurred_at=T, confidence=0.62, participants=[],
+            bbox=(0.47, 0.64, 0.53, 0.70), model_version="ml-0.1.0/yolo26n-det-1.0.0/bytetrack-1.0/objects-0.1.0",
+            run_id=RUN, details={"object_class": "backpack", "unattended_s": 31.5}),
+        "event_proposed_object_taken": Event(
+            schema_version="1.1", event_id=uuid.UUID("9a7f6c8e-2b3d-4e45-9a6b-7c8d9eafb0c7"), event_type="detection",
+            incident_type="object_taken", camera_id="cam-01", occurred_at=T, confidence=0.7, participants=[P21],
+            bbox=(0.47, 0.64, 0.53, 0.70), model_version="ml-0.1.0/yolo26n-det-1.0.0/bytetrack-1.0/objects-0.1.0",
+            run_id=RUN, details={"object_class": "backpack"}),
         "event_proposed_smoke": Event(
             schema_version="1.1", event_id=uuid.UUID("7e5d4a6c-0f1b-4c23-9e4f-5a6b7c8d9ea5"), event_type="detection",
             incident_type="smoke", camera_id="cam-03", occurred_at=T, confidence=0.66, participants=[],
@@ -144,6 +154,13 @@ def invalid(v: dict[str, dict]) -> dict[str, tuple[dict, str]]:
                                             "zone_intrusion без zone_version"),
         "event_smoke_without_bbox": ({k: x for k, x in v["event_proposed_smoke"].items() if k != "bbox"},
                                      "smoke без bbox очага"),
+        "event_object_taken_without_taker": ({**v["event_proposed_object_taken"], "participants": []},
+                                             "object_taken: нужен тот, кто унёс"),
+        "event_abandoned_without_object_bbox": ({k: x for k, x in v["event_proposed_abandoned_object"].items()
+                                                 if k != "bbox"}, "abandoned_object: нужен bbox предмета"),
+        "event_abandoned_unknown_object_class": ({**v["event_proposed_abandoned_object"],
+                                                  "details": {"object_class": "phone", "unattended_s": 30}},
+                                                 "object_class — из списка классов"),
         "event_tampering_with_participants": ({**v["event_proposed_camera_tampering"],
                                                "participants": zone["participants"]},
                                               "camera_tampering: participants пустой"),

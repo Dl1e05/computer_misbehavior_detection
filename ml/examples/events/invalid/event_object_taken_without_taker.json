@@ -1,0 +1,22 @@
+{
+ "_why_invalid": "object_taken: нужен тот, кто унёс",
+ "schema_version": "1.1",
+ "event_id": "9a7f6c8e-2b3d-4e45-9a6b-7c8d9eafb0c7",
+ "event_type": "detection",
+ "incident_type": "object_taken",
+ "camera_id": "cam-01",
+ "occurred_at": "2026-11-21T05:15:32.480Z",
+ "confidence": 0.7,
+ "participants": [],
+ "model_version": "ml-0.1.0/yolo26n-det-1.0.0/bytetrack-1.0/objects-0.1.0",
+ "run_id": "ml-node-1-20261121T050112Z-7f3a",
+ "bbox": [
+  0.47,
+  0.64,
+  0.53,
+  0.7
+ ],
+ "details": {
+  "object_class": "backpack"
+ }
+}

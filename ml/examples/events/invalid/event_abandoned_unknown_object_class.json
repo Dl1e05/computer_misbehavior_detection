@@ -1,0 +1,23 @@
+{
+ "_why_invalid": "object_class — из списка классов",
+ "schema_version": "1.1",
+ "event_id": "8f6e5b7d-1a2c-4d34-8f5a-6b7c8d9eafb6",
+ "event_type": "detection",
+ "incident_type": "abandoned_object",
+ "camera_id": "cam-01",
+ "occurred_at": "2026-11-21T05:15:32.480Z",
+ "confidence": 0.62,
+ "participants": [],
+ "model_version": "ml-0.1.0/yolo26n-det-1.0.0/bytetrack-1.0/objects-0.1.0",
+ "run_id": "ml-node-1-20261121T050112Z-7f3a",
+ "bbox": [
+  0.47,
+  0.64,
+  0.53,
+  0.7
+ ],
+ "details": {
+  "object_class": "phone",
+  "unattended_s": 30
+ }
+}

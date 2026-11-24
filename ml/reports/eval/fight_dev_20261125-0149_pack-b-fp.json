@@ -1,0 +1,139 @@
+{
+ "created": "2026-11-25 01:49",
+ "videos": 800,
+ "wall_s": 176.6,
+ "config": {
+  "task": "fight",
+  "split": "dev",
+  "fps": 8.0,
+  "hold_s": 0.0,
+  "before_s": 1.0,
+  "after_s": 2.0,
+  "rule_params": {
+   "abandoned_object": {
+    "abandon_s": 3,
+    "attend_s": 5,
+    "near_k": 1.0,
+    "classes": [
+     "backpack",
+     "handbag",
+     "suitcase",
+     "laptop"
+    ]
+   },
+   "object_taken": {
+    "confirm_s": 2,
+    "same_look": 0.35
+   }
+  },
+  "label": "negative",
+  "limit_note": "все",
+  "model_version": "ml-0.1.0/yolo26n-det-1.0.0/bytetrack-1.0/objects-0.1.0; ml-0.1.0/yolo26n-det-1.0.0/bytetrack-1.0/objects-0.1.0"
+ },
+ "levels": {
+  "abandoned_object / detection": {
+   "overall": {
+    "videos": 800,
+    "videos_positive": 0,
+    "intervals": 0,
+    "tp": 0,
+    "fn": 0,
+    "fp": 0,
+    "duplicates": 0,
+    "precision": null,
+    "recall": null,
+    "f1": null,
+    "calm_hours": 1.111,
+    "fp_per_hour": 0.0,
+    "delay_p50_s": null,
+    "delay_p95_s": null,
+    "clips": {
+     "pos_pred": 0,
+     "pos_miss": 0,
+     "neg_pred": 0,
+     "neg_clean": 800
+    }
+   },
+   "by_tag": {
+    "cctv": {
+     "videos": 800,
+     "videos_positive": 0,
+     "intervals": 0,
+     "tp": 0,
+     "fn": 0,
+     "fp": 0,
+     "duplicates": 0,
+     "precision": null,
+     "recall": null,
+     "f1": null,
+     "calm_hours": 1.111,
+     "fp_per_hour": 0.0,
+     "delay_p50_s": null,
+     "delay_p95_s": null,
+     "clips": {
+      "pos_pred": 0,
+      "pos_miss": 0,
+      "neg_pred": 0,
+      "neg_clean": 800
+     }
+    }
+   },
+   "errors": {
+    "missed": [],
+    "false": []
+   }
+  },
+  "object_taken / detection": {
+   "overall": {
+    "videos": 800,
+    "videos_positive": 0,
+    "intervals": 0,
+    "tp": 0,
+    "fn": 0,
+    "fp": 0,
+    "duplicates": 0,
+    "precision": null,
+    "recall": null,
+    "f1": null,
+    "calm_hours": 1.111,
+    "fp_per_hour": 0.0,
+    "delay_p50_s": null,
+    "delay_p95_s": null,
+    "clips": {
+     "pos_pred": 0,
+     "pos_miss": 0,
+     "neg_pred": 0,
+     "neg_clean": 800
+    }
+   },
+   "by_tag": {
+    "cctv": {
+     "videos": 800,
+     "videos_positive": 0,
+     "intervals": 0,
+     "tp": 0,
+     "fn": 0,
+     "fp": 0,
+     "duplicates": 0,
+     "precision": null,
+     "recall": null,
+     "f1": null,
+     "calm_hours": 1.111,
+     "fp_per_hour": 0.0,
+     "delay_p50_s": null,
+     "delay_p95_s": null,
+     "clips": {
+      "pos_pred": 0,
+      "pos_miss": 0,
+      "neg_pred": 0,
+      "neg_clean": 800
+     }
+    }
+   },
+   "errors": {
+    "missed": [],
+    "false": []
+   }
+  }
+ }
+}

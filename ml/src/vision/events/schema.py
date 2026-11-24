@@ -48,10 +48,15 @@ PROPOSED_EVENT_TYPES: dict[str, set[str]] = {
     "lying_motionless": {"detection"},
     "camera_tampering": {"detection"},
     "smoke": {"detection"},
+    "abandoned_object": {"detection"},
+    "object_taken": {"detection"},
 }
 ZONE_TYPES = {"zone_intrusion", "loitering", "crowding"}           # нужны zone_id + zone_version
 FIRE_LIKE = {"fire", "smoke"}                                       # bbox очага, участников нет
+OBJECT_TYPES = {"abandoned_object", "object_taken"}                 # bbox — рамка предмета
+BBOX_TYPES = FIRE_LIKE | OBJECT_TYPES                               # bbox обязателен (и только у них)
 NO_PARTICIPANTS = FIRE_LIKE | {"camera_tampering"}
+OPTIONAL_PARTICIPANTS = {"abandoned_object"}                        # владелец мог уже уйти из кадра
 
 
 def is_agreed(incident_type: str) -> bool:
@@ -163,11 +168,27 @@ class TamperingDetails(_Msg):
     tamper_type: Literal["covered", "moved", "defocused", "glare"]
 
 
+ObjectClass = Literal["backpack", "handbag", "suitcase", "laptop", "umbrella"]
+
+
+class AbandonedObjectDetails(_Msg):
+    """abandoned_object: какой предмет и сколько секунд он без присмотра."""
+    object_class: ObjectClass
+    unattended_s: Annotated[float, Field(ge=0)]
+
+
+class ObjectTakenDetails(_Msg):
+    """object_taken: какой предмет унесли (сигнал на проверку, не доказательство кражи)."""
+    object_class: ObjectClass
+
+
 DETAILS: dict[str, type[_Msg]] = {
     "line_crossing": LineCrossingDetails, "loitering": LoiteringDetails, "crowding": CrowdingDetails,
     "running": RunningDetails, "camera_tampering": TamperingDetails,
+    "abandoned_object": AbandonedObjectDetails, "object_taken": ObjectTakenDetails,
 }
-Details = Union[LineCrossingDetails, LoiteringDetails, CrowdingDetails, RunningDetails, TamperingDetails]
+Details = Union[LineCrossingDetails, LoiteringDetails, CrowdingDetails, RunningDetails, TamperingDetails,
+                AbandonedObjectDetails, ObjectTakenDetails]
 
 
 class Event(_Msg):
@@ -175,8 +196,10 @@ class Event(_Msg):
     - event_type: suspicion/confirmation — только у fight; у остальных — detection;
     - zone_id + zone_version — обязательны у zone_intrusion, loitering, crowding и запрещены у прочих;
     - episode_id — обязателен у fight и запрещён у прочих;
-    - bbox — обязателен у fire и smoke (рамка очага) и запрещён у прочих; у них participants пустой;
-    - participants не пустой у всех, кроме fire, smoke, camera_tampering;
+    - bbox — обязателен у fire и smoke (рамка очага), abandoned_object и object_taken (рамка предмета),
+      запрещён у прочих; у fire и smoke participants пустой;
+    - participants не пустой у всех, кроме fire, smoke, camera_tampering (пустой) и abandoned_object
+      (может быть пустым: владелец ушёл);
     - schema 1.1 (новые типы): line_id — обязателен у line_crossing; details — по схеме своего типа.
     """
     schema_version: Literal["1.0", "1.1"] = SCHEMA_VERSION
@@ -233,13 +256,13 @@ class Event(_Msg):
             raise ValueError("fight: нужен episode_id")
         if inc != "fight" and self.episode_id:
             raise ValueError("episode_id — только у fight")
-        if inc in FIRE_LIKE and self.bbox is None:
-            raise ValueError(f"{inc}: нужен bbox очага")
-        if inc not in FIRE_LIKE and self.bbox is not None:
-            raise ValueError(f"bbox события — только у {sorted(FIRE_LIKE)}")
+        if inc in BBOX_TYPES and self.bbox is None:
+            raise ValueError(f"{inc}: нужен bbox ({'очага' if inc in FIRE_LIKE else 'предмета'})")
+        if inc not in BBOX_TYPES and self.bbox is not None:
+            raise ValueError(f"bbox события — только у {sorted(BBOX_TYPES)}")
         if inc in NO_PARTICIPANTS and self.participants:
             raise ValueError(f"{inc}: participants пустой")
-        if inc not in NO_PARTICIPANTS and not self.participants:
+        if inc not in NO_PARTICIPANTS | OPTIONAL_PARTICIPANTS and not self.participants:
             raise ValueError(f"{inc}: нужен хотя бы один участник")
         return self
 

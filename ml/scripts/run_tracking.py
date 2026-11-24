@@ -48,9 +48,16 @@ SKELETON = [(5, 7), (7, 9), (6, 8), (8, 10), (5, 6), (5, 11), (6, 12), (11, 12),
 
 
 def draw(img: np.ndarray, cam_id: str, ts: str, tracks, zones=(), alert_ids=(),
-         poses=None, phases=None, lines=(), note: str = "") -> np.ndarray:
+         poses=None, phases=None, lines=(), note: str = "", objects=(), object_labels=None) -> np.ndarray:
     img = img.copy()
     h, w = img.shape[:2]
+    for o in objects:                                  # предметы: оранжевые, с состоянием (владелец / без присмотра)
+        x1, y1, x2, y2 = map(int, o.bbox)
+        text = (object_labels or {}).get(o.track_id, "")
+        bad = text.startswith(("ABANDONED", "unattended"))
+        c = (0, 0, 255) if bad else (0, 165, 255)
+        cv2.rectangle(img, (x1, y1), (x2, y2), c, 2)
+        cv2.putText(img, text, (x1, max(y1 - 6, 12)), cv2.FONT_HERSHEY_SIMPLEX, 0.55, c, 2)
     for ln in lines:                                   # линия: p1 -> p2, стрелка показывает «in» (слева направо)
         (x1, y1), (x2, y2) = [(int(x * w), int(y * h)) for x, y in ln.points]
         cv2.line(img, (x1, y1), (x2, y2), (255, 200, 0), 3)
@@ -178,8 +185,11 @@ def main() -> None:
                     cam_lines = [ln for r in o.rules for ln in getattr(r, "lines", {}).values()]
                     tamper = next((r.state for r in o.rules if r.incident_type == "camera_tampering"), None)
                     note = f"TAMPER: {tamper}" if tamper not in (None, "normal") else ""
+                    obj_rule = next((r for r in o.rules if hasattr(r, "state_of")), None)
+                    obj_labels = {t.track_id: f"{node.object_names.get(t.cls, t.cls)} {obj_rule.state_of(t.track_id) or ''}"
+                                  for t in o.objects} if obj_rule else {}
                     last_tile[cid] = draw(o.frame.image, cid, o.frame.ts_iso, o.tracks, cam_zones, hot,
-                                          o.poses, phases, cam_lines, note)
+                                          o.poses, phases, cam_lines, note, o.objects, obj_labels)
             if not args.no_show and last_tile:
                 cv2.imshow("tracking", grid([last_tile[c["id"]] for c in cams if c["id"] in last_tile]))
                 if cv2.waitKey(1) & 0xFF in (ord("q"), 27):

@@ -63,8 +63,11 @@ class Metrics:
 class Pipeline:
     def __init__(self, app: dict, cams: list[dict], zones: dict, root: Path, *, fast: bool = False,
                  fps: float | None = None, faces: bool = True, mqtt: bool = True,
-                 on_event=None, on_participant=None):
-        """app — app.yaml; cams — камеры (как в cameras.yaml); fast — файлы без ожидания и без loop."""
+                 on_event=None, on_participant=None, shared: "Pipeline | None" = None):
+        """app — app.yaml; cams — камеры (как в cameras.yaml); fast — файлы без ожидания и без loop.
+
+        shared — взять уже загруженные модели у другого Pipeline (оценка пачками роликов).
+        """
         self.app, self.cams, self.root = app, cams, root
         self.on_event, self.on_participant = on_event, on_participant
         self.status = NodeStatus(node_id=app.get("node", {}).get("node_id", "ml-node-1"))
@@ -80,7 +83,8 @@ class Pipeline:
             self.sources.append(VideoSource(cid, src, process_fps=cam_fps,
                                             realtime=not fast and cam.get("realtime", True),
                                             loop=cam.get("loop", False) and not fast,
-                                            on_status=self.status.set_camera))
+                                            on_status=self.status.set_camera,
+                                            crop=cam.get("crop"), hold_last_s=cam.get("hold_last_s", 0.0)))
             self.status.set_camera(cid, "offline")
             self.trackers[cid] = CameraTracker.from_config(cid, cam_fps, app["tracker"])
             self.rules[cid] = build_rules(cid, cam.get("rules"), zones)
@@ -88,7 +92,7 @@ class Pipeline:
                 self.status.set_rule(cid, r.incident_type, "on")
             log.info("camera %s: правила %s", cid, [type(r).__name__ for r in self.rules[cid]])
 
-        self._init_models()
+        self._init_models(shared)
         self._init_faces(faces)
         self._init_publisher(mqtt)
         self._sessions: dict[str, int] = {}
@@ -100,10 +104,13 @@ class Pipeline:
         cfg["weights"] = str(self.root / cfg["weights"])
         return cfg
 
-    def _init_models(self) -> None:
+    def _init_models(self, shared: "Pipeline | None" = None) -> None:
         n = len(self.cams)
-        self.detector = BatchDetector.from_config(self._weights(self.app["detector"]))
-        self.detector.warmup(n)
+        if shared is not None:
+            self.detector = shared.detector
+        else:
+            self.detector = BatchDetector.from_config(self._weights(self.app["detector"]))
+            self.detector.warmup(n)
 
         # огонь: только камеры с правилом fire; нет весов — правило выключено, узел работает
         self.fire_cams = {c for c, rs in self.rules.items() if "fire" in required_inputs(rs)}
@@ -112,10 +119,13 @@ class Pipeline:
         if self.fire_cams:
             cfg = self._weights(self.app["fire"])
             self.fire_period = 1.0 / float(cfg.pop("run_hz", 3))
-            self.fire_model = FireDetector.from_config(cfg)
-            if self.fire_model.available:
-                self.fire_model.warmup(len(self.fire_cams))
+            if shared is not None and shared.fire_model is not None:
+                self.fire_model = shared.fire_model
             else:
+                self.fire_model = FireDetector.from_config(cfg)
+                if self.fire_model.available:
+                    self.fire_model.warmup(len(self.fire_cams))
+            if not self.fire_model.available:
                 for c in self.fire_cams:
                     self.rules[c] = [r for r in self.rules[c] if "fire" not in r.requires]
                     self.status.set_rule(c, "fire", f"off: {self.fire_model.reason}")
@@ -129,8 +139,11 @@ class Pipeline:
             cfg = self._weights(self.app["pose"])
             cfg.pop("mode", None)
             self.match_iou = cfg.pop("match_iou", 0.5)
-            self.pose_model = PoseEstimator.from_config(cfg)
-            self.pose_model.warmup(len(self.pose_cams))
+            if shared is not None and shared.pose_model is not None:
+                self.pose_model = shared.pose_model
+            else:
+                self.pose_model = PoseEstimator.from_config(cfg)
+                self.pose_model.warmup(len(self.pose_cams))
 
     def _init_faces(self, enabled: bool) -> None:
         from vision.face.face_service import FaceService

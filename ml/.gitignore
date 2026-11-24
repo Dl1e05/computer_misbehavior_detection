@@ -16,6 +16,9 @@ weights/*
 #Данные
 data/*
 !data/.gitkeep
+!data/manifest.csv
+!data/annotations/
+!data/splits/
 *.mp4
 *.avi
 

@@ -100,3 +100,39 @@ def test_live_reconnect_offline_online(monkeypatch):
     second = [f for f in frames if f.session == 2]
     assert second[0].index == 0          # новая сессия -> счёт заново, трекер сбросить
     assert all(f.ts.tzinfo is not None for f in frames)
+
+
+def test_crop_and_hold_last(video_file):
+    """Оценка на коротких клипах: правая половина кадра + удержание последнего кадра 1 с."""
+    src = VideoSource("cam-01", str(video_file), process_fps=5, realtime=False,
+                      crop=(0.5, 0.0, 1.0, 1.0), hold_last_s=1.0)
+    frames = list(src)
+    assert len(frames) == 10 + 5                       # 2 с ролика + 1 с удержания при 5 кадр/с
+    assert frames[0].image.shape == (48, 32, 3)        # правая половина 64x48
+    assert np.array_equal(frames[-1].image, frames[9].image)
+    gaps = [b.ts - a.ts for a, b in zip(frames, frames[1:])]
+    assert all(g == timedelta(milliseconds=200) for g in gaps)   # время идёт ровно и дальше
+
+
+def test_bad_crop_rejected():
+    with pytest.raises(ValueError):
+        VideoSource("cam-01", "x.mp4", crop=(0.6, 0, 0.5, 1))
+
+
+def test_no_frames_while_camera_offline(monkeypatch):
+    """ТЗ 3.3: по офлайн-камере событий нет — пока камера offline, кадров (а значит и правил) нет."""
+    caps = iter([FakeCap(5), None, None, FakeCap(10_000)])
+    monkeypatch.setattr(VideoSource, "_open", lambda self: next(caps, None))
+    marks = []                                          # (момент, статус)
+    src = VideoSource("cam-01", "rtsp://localhost:8554/cam1", process_fps=1000, fail_threshold=2,
+                      min_backoff_s=0.05, on_status=lambda cam, s: marks.append((time.monotonic(), s)))
+    frames = []
+    deadline = time.monotonic() + 10
+    for f in src:
+        frames.append(f)
+        if (f.session == 2 and f.index >= 3) or time.monotonic() > deadline:
+            break
+    off = next(t for t, s in marks if s == OFFLINE)
+    back = next(t for t, s in marks if s == ONLINE and t > off)
+    assert back - off > 0.05                            # был заметный офлайн
+    assert not [f for f in frames if off < f.t_read < back]

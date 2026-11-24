@@ -1,0 +1,4 @@
+video_id,event_type,t_s,confidence
+fall-01-cam0,detection,8.0,0.89
+fall-07-cam0,detection,8.25,0.648
+fall-15-cam0,detection,5.625,0.296

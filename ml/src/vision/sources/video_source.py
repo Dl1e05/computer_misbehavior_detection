@@ -66,7 +66,12 @@ class VideoSource:
         max_backoff_s: float = 30.0,
         timeout_ms: int = 5000,
         on_status: Callable[[str, str], None] | None = None,
+        crop: tuple[float, float, float, float] | None = None,
+        hold_last_s: float = 0.0,
     ):
+        """crop — вырезать часть кадра (x1, y1, x2, y2 в долях 0–1), напр. RGB-половина UR Fall;
+        hold_last_s — только файл: после конца ещё столько секунд отдавать последний кадр
+        (протокол оценки на коротких клипах: «человек продолжает лежать»)."""
         self.camera_id = camera_id
         self.source = os.path.expandvars(source)   # ${CAM01_PASS} -> из переменных окружения
         self.process_fps = process_fps
@@ -78,6 +83,10 @@ class VideoSource:
         self.timeout_ms = timeout_ms   # открыть / прочитать кадр, иначе read() висит ~30 с
         self.on_status = on_status
         self.live = is_live(self.source)
+        self.crop = tuple(crop) if crop else None
+        if self.crop and not (0 <= self.crop[0] < self.crop[2] <= 1 and 0 <= self.crop[1] < self.crop[3] <= 1):
+            raise ValueError(f"{camera_id}: crop — доли 0–1, x1<x2, y1<y2: {crop}")
+        self.hold_last_s = float(hold_last_s)
 
         self.status = OFFLINE
         self.session = 0
@@ -126,7 +135,15 @@ class VideoSource:
             self._thread.join(timeout=5)
 
     def __iter__(self) -> Iterator[Frame]:
-        return self._iter_live() if self.live else self._iter_file()
+        frames = self._iter_live() if self.live else self._iter_file()
+        return self._cropped(frames) if self.crop else frames
+
+    def _cropped(self, frames: Iterator[Frame]) -> Iterator[Frame]:
+        for f in frames:
+            h, w = f.image.shape[:2]
+            x1, y1, x2, y2 = self.crop
+            f.image = np.ascontiguousarray(f.image[int(y1 * h):int(y2 * h), int(x1 * w):int(x2 * w)])
+            yield f
 
     # ---------- файл ----------
 
@@ -146,6 +163,7 @@ class VideoSource:
             next_t = 0.0          # время в видео, когда отдать следующий кадр
             n_read = 0
             index = 0
+            last_img = None
             try:
                 while not self._stop.is_set():
                     video_t = n_read / file_fps
@@ -158,6 +176,7 @@ class VideoSource:
                     ok, img = cap.read()
                     if not ok:
                         break
+                    last_img = img
                     next_t += step
                     if self.realtime:
                         delay = video_t - (time.monotonic() - wall_start)
@@ -166,6 +185,17 @@ class VideoSource:
                     yield Frame(self.camera_id, start + timedelta(seconds=video_t),
                                 img, index, self.session)
                     index += 1
+                # удержание последнего кадра (только для оценки на коротких клипах)
+                end_t = next_t + self.hold_last_s
+                while last_img is not None and next_t < end_t - 1e-9 and not self._stop.is_set():
+                    if self.realtime:
+                        delay = next_t - (time.monotonic() - wall_start)
+                        if delay > 0:
+                            time.sleep(delay)
+                    yield Frame(self.camera_id, start + timedelta(seconds=next_t), last_img.copy(),
+                                index, self.session)
+                    index += 1
+                    next_t += step
             finally:
                 cap.release()
             if not self.loop:

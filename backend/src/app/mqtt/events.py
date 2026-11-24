@@ -13,7 +13,7 @@ SRS failure code, so the caller can read the code straight from the error.
 import re
 import uuid
 from dataclasses import dataclass
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from typing import Annotated, Any, Self
 
 from pydantic import (
@@ -62,6 +62,7 @@ FACE_FIELDS = ("embedding", "embedding_model_version", "snapshot_ref")
 # back forever.
 _INT32_MAX = 2**31 - 1
 _INT64_MAX = 2**63 - 1
+_MIN_TIME = datetime.min.replace(tzinfo=UTC)
 
 
 @dataclass(frozen=True)
@@ -194,6 +195,8 @@ class MlEvent(BaseModel):
         # V9: RFC 3339 with timezone Z.
         if value.utcoffset() != timedelta(0):
             raise _fail(FailureCode.INVALID_TIMESTAMP, "occurred_at must be UTC")
+        if value == _MIN_TIME:
+            raise _fail(FailureCode.INVALID_TIMESTAMP, "occurred_at is empty")
         return value
 
     # Pydantic runs this only once every field is valid. So if a message has

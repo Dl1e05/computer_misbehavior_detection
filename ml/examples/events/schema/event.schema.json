@@ -47,8 +47,11 @@
  "additionalProperties": false,
  "properties": {
   "schema_version": {
-   "const": "1.0",
    "default": "1.0",
+   "enum": [
+    "1.0",
+    "1.1"
+   ],
    "title": "Schema Version",
    "type": "string"
   },
@@ -178,6 +181,94 @@
    ],
    "default": null,
    "title": "Bbox"
+  },
+  "line_id": {
+   "anyOf": [
+    {
+     "maxLength": 128,
+     "minLength": 1,
+     "pattern": "^[A-Za-z0-9._:\\-]+$",
+     "type": "string"
+    },
+    {
+     "type": "null"
+    }
+   ],
+   "default": null,
+   "title": "Line Id"
+  },
+  "direction": {
+   "anyOf": [
+    {
+     "enum": [
+      "in",
+      "out"
+     ],
+     "type": "string"
+    },
+    {
+     "type": "null"
+    }
+   ],
+   "default": null,
+   "title": "Direction"
+  },
+  "dwell_s": {
+   "anyOf": [
+    {
+     "minimum": 0,
+     "type": "number"
+    },
+    {
+     "type": "null"
+    }
+   ],
+   "default": null,
+   "title": "Dwell S"
+  },
+  "count": {
+   "anyOf": [
+    {
+     "minimum": 1,
+     "type": "integer"
+    },
+    {
+     "type": "null"
+    }
+   ],
+   "default": null,
+   "title": "Count"
+  },
+  "speed": {
+   "anyOf": [
+    {
+     "minimum": 0,
+     "type": "number"
+    },
+    {
+     "type": "null"
+    }
+   ],
+   "default": null,
+   "title": "Speed"
+  },
+  "tamper_type": {
+   "anyOf": [
+    {
+     "enum": [
+      "covered",
+      "moved",
+      "defocused",
+      "glare"
+     ],
+     "type": "string"
+    },
+    {
+     "type": "null"
+    }
+   ],
+   "default": null,
+   "title": "Tamper Type"
   }
  },
  "required": [

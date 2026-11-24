@@ -1,0 +1,212 @@
+{
+ "created": "2026-11-25 01:17",
+ "videos": 800,
+ "wall_s": 303.7,
+ "config": {
+  "task": "fight",
+  "split": "dev",
+  "fps": 8.0,
+  "hold_s": 0.0,
+  "before_s": 1.0,
+  "after_s": 2.0,
+  "rule_params": {
+   "running": {
+    "speed": 1.6,
+    "min_s": 1.0
+   },
+   "lying_motionless": {
+    "lie_s": 30
+   },
+   "camera_tampering": {
+    "hold_s": 3,
+    "learn_s": 1
+   }
+  },
+  "label": "negative",
+  "limit_note": "все",
+  "model_version": "ml-0.1.0/yolo26n-det-1.0.0/bytetrack-1.0/run-0.1.0; ml-0.1.0/yolo26n-det-1.0.0/bytetrack-1.0/yolo26n-pose-1.0.0/lying-0.1.0; ml-0.1.0/tamper-0.1.0"
+ },
+ "levels": {
+  "running / detection": {
+   "overall": {
+    "videos": 800,
+    "videos_positive": 0,
+    "intervals": 0,
+    "tp": 0,
+    "fn": 0,
+    "fp": 0,
+    "duplicates": 0,
+    "precision": null,
+    "recall": null,
+    "f1": null,
+    "calm_hours": 1.111,
+    "fp_per_hour": 0.0,
+    "delay_p50_s": null,
+    "delay_p95_s": null,
+    "clips": {
+     "pos_pred": 0,
+     "pos_miss": 0,
+     "neg_pred": 0,
+     "neg_clean": 800
+    }
+   },
+   "by_tag": {
+    "cctv": {
+     "videos": 800,
+     "videos_positive": 0,
+     "intervals": 0,
+     "tp": 0,
+     "fn": 0,
+     "fp": 0,
+     "duplicates": 0,
+     "precision": null,
+     "recall": null,
+     "f1": null,
+     "calm_hours": 1.111,
+     "fp_per_hour": 0.0,
+     "delay_p50_s": null,
+     "delay_p95_s": null,
+     "clips": {
+      "pos_pred": 0,
+      "pos_miss": 0,
+      "neg_pred": 0,
+      "neg_clean": 800
+     }
+    }
+   },
+   "errors": {
+    "missed": [],
+    "false": []
+   }
+  },
+  "lying_motionless / detection": {
+   "overall": {
+    "videos": 800,
+    "videos_positive": 0,
+    "intervals": 0,
+    "tp": 0,
+    "fn": 0,
+    "fp": 0,
+    "duplicates": 0,
+    "precision": null,
+    "recall": null,
+    "f1": null,
+    "calm_hours": 1.111,
+    "fp_per_hour": 0.0,
+    "delay_p50_s": null,
+    "delay_p95_s": null,
+    "clips": {
+     "pos_pred": 0,
+     "pos_miss": 0,
+     "neg_pred": 0,
+     "neg_clean": 800
+    }
+   },
+   "by_tag": {
+    "cctv": {
+     "videos": 800,
+     "videos_positive": 0,
+     "intervals": 0,
+     "tp": 0,
+     "fn": 0,
+     "fp": 0,
+     "duplicates": 0,
+     "precision": null,
+     "recall": null,
+     "f1": null,
+     "calm_hours": 1.111,
+     "fp_per_hour": 0.0,
+     "delay_p50_s": null,
+     "delay_p95_s": null,
+     "clips": {
+      "pos_pred": 0,
+      "pos_miss": 0,
+      "neg_pred": 0,
+      "neg_clean": 800
+     }
+    }
+   },
+   "errors": {
+    "missed": [],
+    "false": []
+   }
+  },
+  "camera_tampering / detection": {
+   "overall": {
+    "videos": 800,
+    "videos_positive": 0,
+    "intervals": 0,
+    "tp": 0,
+    "fn": 0,
+    "fp": 3,
+    "duplicates": 0,
+    "precision": 0.0,
+    "recall": null,
+    "f1": 0.0,
+    "calm_hours": 1.111,
+    "fp_per_hour": 2.7,
+    "delay_p50_s": null,
+    "delay_p95_s": null,
+    "clips": {
+     "pos_pred": 0,
+     "pos_miss": 0,
+     "neg_pred": 3,
+     "neg_clean": 797
+    }
+   },
+   "by_tag": {
+    "cctv": {
+     "videos": 800,
+     "videos_positive": 0,
+     "intervals": 0,
+     "tp": 0,
+     "fn": 0,
+     "fp": 3,
+     "duplicates": 0,
+     "precision": 0.0,
+     "recall": null,
+     "f1": 0.0,
+     "calm_hours": 1.111,
+     "fp_per_hour": 2.7,
+     "delay_p50_s": null,
+     "delay_p95_s": null,
+     "clips": {
+      "pos_pred": 0,
+      "pos_miss": 0,
+      "neg_pred": 3,
+      "neg_clean": 797
+     }
+    }
+   },
+   "errors": {
+    "missed": [],
+    "false": [
+     {
+      "video_id": "rwf-fc9f6c2f8d",
+      "file": "data/raw/rwf2000/RWF-2000/RWF-2000/train/Train_NonFight/OTVE3eLAuUM_0.avi",
+      "tags": "cctv",
+      "times_s": [
+       4.5
+      ]
+     },
+     {
+      "video_id": "rwf-973931621b",
+      "file": "data/raw/rwf2000/RWF-2000/RWF-2000/train/Train_NonFight/sy7BoRGE_0.avi",
+      "tags": "cctv",
+      "times_s": [
+       4.5
+      ]
+     },
+     {
+      "video_id": "rwf-6039979e13",
+      "file": "data/raw/rwf2000/RWF-2000/RWF-2000/train/Train_NonFight/uhTalZ00_0.avi",
+      "tags": "cctv",
+      "times_s": [
+       4.5
+      ]
+     }
+    ]
+   }
+  }
+ }
+}

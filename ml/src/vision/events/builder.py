@@ -9,7 +9,7 @@ from __future__ import annotations
 import uuid
 from datetime import datetime, timezone
 
-from vision.events.schema import Event, EventParticipant, Participant
+from vision.events.schema import Event, EventParticipant, Participant, schema_version_for
 
 
 def new_run_id(now: datetime | None = None) -> str:
@@ -48,6 +48,7 @@ class ModelVersions:
 
 def event_from_detection(d, run_id: str, model_version: str, event_id: uuid.UUID | None = None) -> Event:
     return Event(
+        schema_version=schema_version_for(d.incident_type),
         event_id=event_id or uuid.uuid4(),
         event_type=d.event_type,
         incident_type=d.incident_type,
@@ -63,6 +64,7 @@ def event_from_detection(d, run_id: str, model_version: str, event_id: uuid.UUID
         zone_version=d.zone_version,
         episode_id=d.episode_id,
         bbox=tuple(round(v, 4) for v in d.bbox) if d.bbox else None,
+        **(getattr(d, "extra", None) or {}),            # поля новых типов (schema 1.1)
     )
 
 

@@ -1,8 +1,10 @@
 """Правила-плагины. Импорт модуля правила регистрирует его в RULES."""
 from __future__ import annotations
 
+from vision.analytics.zones import Line, Zone
 from vision.rules.base import RULES, Detection, Participant, Rule, RuleContext, register
-from vision.rules import fall, fight, fire, zone  # noqa: F401  — регистрируют все правила
+from vision.rules import (crowd, fall, fight, fire, line, loitering, lying, running,  # noqa: F401
+                          tampering, zone)                                                # — регистрируют правила
 
 
 def build_rules(camera_id: str, rules_cfg: dict | None, zones: dict | None = None) -> list[Rule]:
@@ -17,17 +19,23 @@ def build_rules(camera_id: str, rules_cfg: dict | None, zones: dict | None = Non
         if name not in RULES:
             raise ValueError(f"камера {camera_id}: неизвестное правило '{name}' (есть: {sorted(RULES)})")
         params = dict(params or {})
-        if name == "zone_intrusion":
-            ids = params.get("zones")
-            if ids is None:
-                params["zones"] = [z for z in zones.values() if z.camera_id == camera_id]
-            else:
-                missing = [i for i in ids if i not in zones]
-                if missing:
-                    raise ValueError(f"камера {camera_id}: нет зон {missing} в zones.json")
-                params["zones"] = [zones[i] for i in ids]
-        rules.append(RULES[name](camera_id, params))
+        cls = RULES[name]
+        if cls.uses_zones:
+            params["zones"] = _resolve(camera_id, params.get("zones"), zones, Zone, "зон")
+        if cls.uses_lines:
+            params["lines"] = _resolve(camera_id, params.get("lines"), zones, Line, "линий")
+        rules.append(cls(camera_id, params))
     return rules
+
+
+def _resolve(camera_id: str, ids, items: dict, kind: type, what: str) -> list:
+    """Список id из cameras.yaml -> объекты; без списка — все такие объекты этой камеры."""
+    if ids is None:
+        return [x for x in items.values() if isinstance(x, kind) and x.camera_id == camera_id]
+    missing = [i for i in ids if not isinstance(items.get(i), kind)]
+    if missing:
+        raise ValueError(f"камера {camera_id}: нет {what} {missing} в zones.json")
+    return [items[i] for i in ids]
 
 
 def required_inputs(rules: list[Rule]) -> set[str]:

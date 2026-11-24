@@ -1,4 +1,4 @@
-# Веса и конфигурация узла ML — 2026-11-24 02:54
+# Веса и конфигурация узла ML — 2026-11-25 01:18
 
 Артефакт ТЗ 5.3. Собрано `scripts/export_config_report.py` из `weights/`, `configs/` и окружения.
 
@@ -28,6 +28,12 @@ rules:
   fall: fall-rule-0.1.0
   fight: fight-heur-0.1.0
   fire: fire-mofn-0.1.0
+  line_crossing: line-0.1.0
+  loitering: loiter-0.1.0
+  crowding: crowd-0.1.0
+  running: run-0.1.0
+  lying_motionless: lying-0.1.0
+  camera_tampering: tamper-0.1.0
 ```
 
 ## Узел: `configs/app.yaml`
@@ -87,6 +93,7 @@ mqtt:
   keepalive_s: 10
   heartbeat_s: 5
   outbox: data/outbox.sqlite
+  send_proposed: false
 ```
 
 ## Камеры и правила: `configs/cameras.yaml`
@@ -97,6 +104,13 @@ mqtt:
 | | | | fall | `{"still_s": 3.0}` |
 | | | | fight | `{"scorer": "heuristic", "window_s": 2.0, "suspect_thr": 0.5, "confirm_thr": 0.7, "confirm_s": 1.0, "end_s": 3.0, "close_k": 1.0, "scorer_params": {"arm_speed": 1.5, "turn_speed": 0.8, "turn_deg": 90}}` |
 | | | | fire | `{}` |
+| | | | line_crossing | `{"lines": ["line-walk-1"], "direction": "any", "min_side_s": 0.5, "band": 0.03}` |
+| | | | loitering | `{"zones": ["zone-1"], "dwell_s": 8, "gap_s": 3}` |
+| | | | crowding | `{"zones": ["zone-hall"], "min_count": 8, "min_s": 3, "clear_s": 10}` |
+| | | | running | `{"speed": 1.6, "min_s": 1.0}` |
+| | | | lying_motionless | `{"lie_s": 30}` |
+| | | | camera_tampering | `{"hold_s": 3}` |
+| cam-tamper | `data/tamper_test.mp4` | 8 | camera_tampering | `{}` |
 | cam-fire | `data/fire1.mp4` | 8 | fire | `{"window_runs": 5, "min_hits": 4, "clear_s": 10, "classes": ["fire"], "min_conf": 0.25, "flicker": false, "flicker_min": 0.05}` |
 | cam-nofire | `data/nofire1.mp4` | 8 | fire | `{}` |
 | cam-fight | `data/fight1.mp4` | 8 | fight | `{}` |
@@ -108,6 +122,8 @@ mqtt:
 | зона | камера | версия | активна | вершин |
 |---|---|---|---|---|
 | zone-1 | cam-01 | 1 | True | 4 |
+| zone-hall | cam-01 | 1 | True | 4 |
+| zone-1-night | cam-01 | 1 | True | 4 |
 
 ## Окружение
 

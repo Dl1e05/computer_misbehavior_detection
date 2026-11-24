@@ -1,9 +1,9 @@
 {
- "_why_invalid": "incident_type не согласован",
+ "_why_invalid": "incident_type не согласован и не предложен",
  "schema_version": "1.0",
  "event_id": "5f0c3b52-8d0e-4f0b-9f5e-2b6c1a7d9e01",
  "event_type": "detection",
- "incident_type": "running",
+ "incident_type": "dancing",
  "camera_id": "cam-01",
  "occurred_at": "2026-11-21T05:15:32.480Z",
  "confidence": 0.86,

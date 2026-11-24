@@ -61,6 +61,7 @@ mqtt:                      # контракт ML -> BE; брокер в разр
   keepalive_s: 10          # брокер считает клиента пропавшим через ~1.5 × keepalive -> Last Will
   heartbeat_s: 5
   outbox: data/outbox.sqlite
+  send_proposed: false     # типы событий, ещё не согласованные с BE (schema 1.1), — только в лог
 
 versions:                  # model_version события = ml + модели, которые участвовали (до 128 символов)
   ml: 0.1.0
@@ -73,3 +74,9 @@ versions:                  # model_version события = ml + модели, �
     fall: fall-rule-0.1.0
     fight: fight-heur-0.1.0
     fire: fire-mofn-0.1.0
+    line_crossing: line-0.1.0
+    loitering: loiter-0.1.0
+    crowding: crowd-0.1.0
+    running: run-0.1.0
+    lying_motionless: lying-0.1.0
+    camera_tampering: tamper-0.1.0

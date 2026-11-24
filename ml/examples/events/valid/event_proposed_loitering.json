@@ -1,0 +1,26 @@
+{
+ "schema_version": "1.1",
+ "event_id": "4b2a1d3f-7c8e-4f90-8b1c-2d3e4f5a6b72",
+ "event_type": "detection",
+ "incident_type": "loitering",
+ "camera_id": "cam-01",
+ "occurred_at": "2026-11-21T05:15:32.480Z",
+ "confidence": 0.83,
+ "participants": [
+  {
+   "track_id": 21,
+   "bbox": [
+    0.391,
+    0.181,
+    0.477,
+    0.653
+   ],
+   "confidence": 0.83
+  }
+ ],
+ "model_version": "ml-0.1.0/yolo26n-det-1.0.0/bytetrack-1.0/loiter-0.1.0",
+ "run_id": "ml-20261121-0501",
+ "zone_id": "zone-3",
+ "zone_version": 2,
+ "dwell_s": 64.5
+}

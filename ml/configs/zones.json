@@ -1,9 +1,105 @@
 {
+  "timezone": "Asia/Almaty",
   "zones": [
     {
       "zone_id": "zone-1",
       "camera_id": "cam-01",
-      "polygon": [[0.35, 0.72], [0.65, 0.72], [0.65, 1.0], [0.35, 1.0]],
+      "polygon": [
+        [
+          0.35,
+          0.72
+        ],
+        [
+          0.65,
+          0.72
+        ],
+        [
+          0.65,
+          1.0
+        ],
+        [
+          0.35,
+          1.0
+        ]
+      ],
+      "version": 1,
+      "active": true
+    },
+    {
+      "zone_id": "zone-hall",
+      "camera_id": "cam-01",
+      "polygon": [
+        [
+          0.05,
+          0.5
+        ],
+        [
+          0.8,
+          0.5
+        ],
+        [
+          0.8,
+          1.0
+        ],
+        [
+          0.05,
+          1.0
+        ]
+      ],
+      "version": 1,
+      "active": true
+    },
+    {
+      "zone_id": "zone-1-night",
+      "camera_id": "cam-01",
+      "polygon": [
+        [
+          0.35,
+          0.72
+        ],
+        [
+          0.65,
+          0.72
+        ],
+        [
+          0.65,
+          1.0
+        ],
+        [
+          0.35,
+          1.0
+        ]
+      ],
+      "version": 1,
+      "active": true,
+      "schedule": [
+        {
+          "days": "mon-fri",
+          "from": "22:00",
+          "to": "07:00"
+        },
+        {
+          "days": "sat,sun",
+          "from": "00:00",
+          "to": "24:00"
+        }
+      ]
+    }
+  ],
+  "lines": [
+    {
+      "line_id": "line-walk-1",
+      "camera_id": "cam-01",
+      "points": [
+        [
+          0.1,
+          0.75
+        ],
+        [
+          0.8,
+          0.75
+        ]
+      ],
       "version": 1,
       "active": true
     }

@@ -1,0 +1,25 @@
+{
+ "_why_invalid": "camera_tampering: participants пустой",
+ "schema_version": "1.1",
+ "event_id": "6d4c3f5b-9e0a-4b12-8d3e-4f5a6b7c8d94",
+ "event_type": "detection",
+ "incident_type": "camera_tampering",
+ "camera_id": "cam-02",
+ "occurred_at": "2026-11-21T05:15:32.480Z",
+ "confidence": 0.93,
+ "participants": [
+  {
+   "track_id": 17,
+   "bbox": [
+    0.322,
+    0.167,
+    0.414,
+    0.639
+   ],
+   "confidence": 0.88
+  }
+ ],
+ "model_version": "ml-0.1.0/tamper-0.1.0",
+ "run_id": "ml-20261121-0501",
+ "tamper_type": "covered"
+}

@@ -9,6 +9,9 @@
   только после min_outside_s снаружи (иначе дрожание рамки на границе
   дало бы серию событий). Объединение повторов за 60 с делает BE.
 
+Расписание зоны (zone.schedule, например «после 22:00»): вне окна зона не охраняется и
+состояние сбрасывается; когда окно началось, кто уже внутри — считается «появившимся внутри».
+
 Пороги в секундах, а не в кадрах — смена process_fps ничего не ломает.
 """
 from __future__ import annotations
@@ -33,6 +36,7 @@ class _State:
 class ZoneIntrusionRule(Rule):
     incident_type = "zone_intrusion"
     requires = {"persons"}
+    uses_zones = True
 
     def __init__(self, camera_id: str, params: dict):
         super().__init__(camera_id, params)
@@ -46,7 +50,8 @@ class ZoneIntrusionRule(Rule):
 
     def set_zones(self, zones: list[Zone]) -> None:
         """Обновление зон (из API BE раз в 30 с). Изменилась версия — состояние зоны заново."""
-        new = {z.zone_id: z for z in zones if z.active and z.camera_id == self.camera_id}
+        new = {z.zone_id: z for z in zones
+               if isinstance(z, Zone) and z.active and z.camera_id == self.camera_id}
         for key in list(self._state):
             old, cur = self.zones.get(key[1]), new.get(key[1])
             if cur is None or old is None or old.version != cur.version:
@@ -60,6 +65,10 @@ class ZoneIntrusionRule(Rule):
         now = ctx.ts
         out: list[Detection] = []
         for zone in self.zones.values():
+            if not zone.armed(now):                     # по расписанию зона сейчас не охраняется
+                for key in [k for k in self._state if k[1] == zone.zone_id]:
+                    del self._state[key]                # включится — кто внутри, тот «появился внутри»
+                continue
             entered, inside = [], []
             for t in ctx.tracks:
                 st = self._state.setdefault((t.track_id, zone.zone_id), _State())

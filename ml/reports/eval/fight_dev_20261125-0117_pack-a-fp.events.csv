@@ -1,0 +1,4 @@
+video_id,event_type,t_s,confidence
+rwf-6039979e13,camera_tampering/detection,4.5,0.759
+rwf-973931621b,camera_tampering/detection,4.5,1.0
+rwf-fc9f6c2f8d,camera_tampering/detection,4.5,0.973

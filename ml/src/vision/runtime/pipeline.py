@@ -21,6 +21,7 @@ from pathlib import Path
 
 from vision.analytics.tracker import CameraTracker
 from vision.events.builder import ModelVersions, event_from_detection, new_run_id, participant_from
+from vision.events.schema import is_agreed
 from vision.events.outbox import Outbox
 from vision.events.publisher import Publisher
 from vision.face.participants import FACE_EVENTS, ParticipantCollector
@@ -55,6 +56,7 @@ class Metrics:
     frames: dict[str, int] = field(default_factory=lambda: defaultdict(int))
     events: dict[str, int] = field(default_factory=lambda: defaultdict(int))
     participants: dict[str, dict[str, int]] = field(default_factory=lambda: defaultdict(lambda: defaultdict(int)))
+    local_only: dict[str, int] = field(default_factory=lambda: defaultdict(int))   # не отправлено: тип не согласован
 
     def reset(self) -> None:
         self.__init__()
@@ -173,6 +175,7 @@ class Pipeline:
         self.run_id = new_run_id()
         self.versions = ModelVersions(self.app.get("versions", {}))
         cfg = dict(self.app.get("mqtt", {}))
+        self.send_proposed = bool(cfg.get("send_proposed", False))
         self.publisher = None
         if enabled and cfg.get("enabled", True):
             outbox = Outbox(self.root / cfg.get("outbox", "data/outbox.sqlite"))
@@ -260,7 +263,10 @@ class Pipeline:
             log.error("событие %s/%s не по контракту, не отправлено: %s", d.incident_type, d.event_type, err)
             return None
         if self.publisher:
-            self.publisher.submit_event(e)
+            if is_agreed(e.incident_type) or self.send_proposed:
+                self.publisher.submit_event(e)
+            else:                                                      # тип ещё не согласован с BE
+                self.metrics.local_only[e.incident_type] += 1
         if self.on_event:
             self.on_event(e)
         return e

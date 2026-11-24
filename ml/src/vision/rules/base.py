@@ -43,6 +43,7 @@ class Detection:
     zone_version: int | None = None
     episode_id: str | None = None
     bbox: tuple[float, float, float, float] | None = None   # доли 0–1; для fire — рамка очага
+    extra: dict[str, Any] = field(default_factory=dict)      # поля новых типов: line_id, direction, dwell_s, count, tamper_type
 
 
 @dataclass
@@ -70,6 +71,8 @@ class Rule:
     """Базовый класс правила. Каждое правило наследуется от него."""
     incident_type: str = ""
     requires: set[str] = {"persons"}
+    uses_zones: bool = False      # params["zones"]: список id -> объекты Zone (build_rules)
+    uses_lines: bool = False      # params["lines"]: список id -> объекты Line
 
     def __init__(self, camera_id: str, params: dict[str, Any]):
         self.camera_id = camera_id

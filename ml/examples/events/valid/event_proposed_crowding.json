@@ -1,0 +1,36 @@
+{
+ "schema_version": "1.1",
+ "event_id": "5c3b2e4a-8d9f-4a01-9c2d-3e4f5a6b7c83",
+ "event_type": "detection",
+ "incident_type": "crowding",
+ "camera_id": "cam-01",
+ "occurred_at": "2026-11-21T05:15:32.480Z",
+ "confidence": 0.75,
+ "participants": [
+  {
+   "track_id": 17,
+   "bbox": [
+    0.322,
+    0.167,
+    0.414,
+    0.639
+   ],
+   "confidence": 0.88
+  },
+  {
+   "track_id": 21,
+   "bbox": [
+    0.391,
+    0.181,
+    0.477,
+    0.653
+   ],
+   "confidence": 0.83
+  }
+ ],
+ "model_version": "ml-0.1.0/yolo26n-det-1.0.0/bytetrack-1.0/crowd-0.1.0",
+ "run_id": "ml-20261121-0501",
+ "zone_id": "zone-hall",
+ "zone_version": 1,
+ "count": 9
+}

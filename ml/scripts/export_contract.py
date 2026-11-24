@@ -70,6 +70,26 @@ def valid() -> dict[str, bytes]:
                                                CameraStatus(camera_id="cam-03", status="offline",
                                                             rules={"fire": "off: нет весов (обучение — Фаза 3.1)"})]),
         "heartbeat_last_will": Heartbeat(node_id="ml-node-1", run_id=RUN, status="offline"),
+        # --- schema 1.1: предложено BE 24.11, пока не согласовано (ML не отправляет их в MQTT) ---
+        "event_proposed_line_crossing": Event(
+            schema_version="1.1", event_id=uuid.UUID("3a1f0c2e-6b7d-4e8f-9a0b-1c2d3e4f5a61"), event_type="detection",
+            incident_type="line_crossing", camera_id="cam-01", occurred_at=T, confidence=0.88, participants=[P17],
+            model_version="ml-0.1.0/yolo26n-det-1.0.0/bytetrack-1.0/line-0.1.0", run_id=RUN,
+            line_id="line-door-1", direction="in"),
+        "event_proposed_loitering": Event(
+            schema_version="1.1", event_id=uuid.UUID("4b2a1d3f-7c8e-4f90-8b1c-2d3e4f5a6b72"), event_type="detection",
+            incident_type="loitering", camera_id="cam-01", occurred_at=T, confidence=0.83, participants=[P21],
+            model_version="ml-0.1.0/yolo26n-det-1.0.0/bytetrack-1.0/loiter-0.1.0", run_id=RUN,
+            zone_id="zone-3", zone_version=2, dwell_s=64.5),
+        "event_proposed_crowding": Event(
+            schema_version="1.1", event_id=uuid.UUID("5c3b2e4a-8d9f-4a01-9c2d-3e4f5a6b7c83"), event_type="detection",
+            incident_type="crowding", camera_id="cam-01", occurred_at=T, confidence=0.75, participants=[P17, P21],
+            model_version="ml-0.1.0/yolo26n-det-1.0.0/bytetrack-1.0/crowd-0.1.0", run_id=RUN,
+            zone_id="zone-hall", zone_version=1, count=9),
+        "event_proposed_camera_tampering": Event(
+            schema_version="1.1", event_id=uuid.UUID("6d4c3f5b-9e0a-4b12-8d3e-4f5a6b7c8d94"), event_type="detection",
+            incident_type="camera_tampering", camera_id="cam-02", occurred_at=T, confidence=0.93, participants=[],
+            model_version="ml-0.1.0/tamper-0.1.0", run_id=RUN, tamper_type="covered"),
     }
 
 
@@ -98,7 +118,16 @@ def invalid(v: dict[str, dict]) -> dict[str, tuple[dict, str]]:
         "event_without_run_id": ({k: x for k, x in zone.items() if k != "run_id"}, "run_id обязателен"),
         "event_time_without_timezone": ({**zone, "occurred_at": "2026-11-21T05:15:32.480"}, "время без зоны"),
         "event_bad_event_id": ({**zone, "event_id": "123"}, "event_id — uuid"),
-        "event_unknown_incident": ({**zone, "incident_type": "running"}, "incident_type не согласован"),
+        "event_unknown_incident": ({**zone, "incident_type": "dancing"}, "incident_type не согласован и не предложен"),
+        "event_proposed_with_schema_1_0": ({**v["event_proposed_line_crossing"], "schema_version": "1.0"},
+                                           "новый тип — только schema 1.1"),
+        "event_line_without_direction": ({k: x for k, x in v["event_proposed_line_crossing"].items()
+                                          if k != "direction"}, "line_crossing: нужен direction"),
+        "event_extra_field_on_wrong_type": ({**v["event_proposed_loitering"], "count": 3},
+                                            "count — только у crowding"),
+        "event_tampering_with_participants": ({**v["event_proposed_camera_tampering"],
+                                               "participants": zone["participants"]},
+                                              "camera_tampering: participants пустой"),
         "event_unknown_field": ({**zone, "severity": "high"}, "лишнее поле (Важность ставит BE)"),
         "participant_no_face_with_embedding": ({**noface, "embedding": emb}, "no_usable_face — без вектора"),
         "participant_face_without_ref": ({k: x for k, x in face.items() if k != "snapshot_ref"},

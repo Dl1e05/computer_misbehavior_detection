@@ -25,6 +25,34 @@ cameras:
           turn_speed: 0.8         # или средняя скорость ...
           turn_deg: 90            # ... с разворотом направления (замах -> удар)
       fire: {}                    # без весов выключится — проверка статуса узла
+      # --- шаг 11, пакет A (типы 1.1: пока не согласованы с BE — только в лог) ---
+      line_crossing:
+        lines: [line-walk-1]      # id линий из configs/zones.json ("lines")
+        direction: any            # any | in (слева направо вдоль p1->p2) | out
+        min_side_s: 0.5           # столько секунд на новой стороне, чтобы засчитать (антидребезг)
+        band: 0.03                # полоса у линии (доля кадра), в которой сторона не меняется
+      loitering:
+        zones: [zone-1]
+        dwell_s: 8                # демо; в жизни 60–180 с
+        gap_s: 3                  # короткие выходы за границу не обнуляют время
+      crowding:
+        zones: [zone-hall]
+        min_count: 8              # своё для каждой камеры
+        min_s: 3                  # столько секунд держится скопление
+        clear_s: 10               # людей меньше порога столько — следующее скопление снова событие
+      running:
+        speed: 1.6                # ростов/с; шаг ~0.7–1.0, бег 1.5–3 (ролик ускорен — проверим ложные)
+        min_s: 1.0
+      lying_motionless:
+        lie_s: 30                 # лежит неподвижно столько секунд
+      camera_tampering:           # закрыли / развернули / расфокус / засветка — по самой картинке
+        hold_s: 3
+  - id: cam-tamper
+    source: data/tamper_test.mp4  # demo2 со вставками: закрыли, расфокус, засветка, разворот (scripts/make_tamper_clip.py)
+    process_fps: 8
+    realtime: true
+    rules:
+      camera_tampering: {}
   - id: cam-fire
     source: data/fire1.mp4        # D-Fire Videos/VP1 (с огнём)
     process_fps: 8

@@ -24,13 +24,39 @@ TOPIC_PREFIX = "videoanalytics/v1"
 MAX_BYTES = 256 * 1024
 NO_USABLE_FACE = "no_usable_face"
 
-# какие event_type допустимы у какого incident_type; новые правила добавляются сюда по согласованию с BE
+# какие event_type допустимы у какого incident_type — СОГЛАСОВАНО с BE (schema 1.0)
 EVENT_TYPES: dict[str, set[str]] = {
     "zone_intrusion": {"detection"},
     "fall": {"detection"},
     "fire": {"detection"},
     "fight": {"suspicion", "confirmation"},
 }
+# ПРЕДЛОЖЕНО BE 24.11 (schema 1.1, шаг 11): пока BE не подтвердил — только лог, в MQTT не уходят
+# (mqtt.send_proposed: true — отправлять). Подтвердили — перенести в EVENT_TYPES.
+PROPOSED_EVENT_TYPES: dict[str, set[str]] = {
+    "line_crossing": {"detection"},
+    "loitering": {"detection"},
+    "crowding": {"detection"},
+    "running": {"detection"},
+    "lying_motionless": {"detection"},
+    "camera_tampering": {"detection"},
+}
+ZONE_TYPES = {"zone_intrusion", "loitering", "crowding"}           # нужны zone_id + zone_version
+NO_PARTICIPANTS = {"fire", "camera_tampering"}                      # участников нет
+EXTRA_FIELDS = {                                                     # поля 1.1: только у своего типа
+    "line_id": {"line_crossing"}, "direction": {"line_crossing"}, "dwell_s": {"loitering"},
+    "count": {"crowding"}, "speed": {"running"}, "tamper_type": {"camera_tampering"},
+}
+REQUIRED_EXTRA = {"line_crossing": {"line_id", "direction"}, "loitering": {"dwell_s"}, "crowding": {"count"},
+                  "camera_tampering": {"tamper_type"}}
+
+
+def is_agreed(incident_type: str) -> bool:
+    return incident_type in EVENT_TYPES
+
+
+def schema_version_for(incident_type: str) -> str:
+    return SCHEMA_VERSION if is_agreed(incident_type) else "1.1"
 
 
 def topic_event(camera_id: str) -> str:
@@ -88,7 +114,7 @@ class EventParticipant(_Msg):
 
 
 class Event(_Msg):
-    schema_version: Literal["1.0"] = SCHEMA_VERSION
+    schema_version: Literal["1.0", "1.1"] = SCHEMA_VERSION
     event_id: UUID
     event_type: Literal["detection", "suspicion", "confirmation"]
     incident_type: Annotated[str, Field(pattern=r"^[a-z][a-z0-9_]{1,63}$")]
@@ -102,6 +128,13 @@ class Event(_Msg):
     zone_version: Annotated[int, Field(ge=0)] | None = None
     episode_id: Annotated[str, Field(min_length=1, max_length=128)] | None = None
     bbox: BBox | None = None
+    # --- 1.1 (предложено BE) ---
+    line_id: Id | None = None
+    direction: Literal["in", "out"] | None = None
+    dwell_s: Annotated[float, Field(ge=0)] | None = None
+    count: Annotated[int, Field(ge=1)] | None = None
+    speed: Annotated[float, Field(ge=0)] | None = None
+    tamper_type: Literal["covered", "moved", "defocused", "glare"] | None = None
 
     @field_serializer("occurred_at")
     def _ser_time(self, v: datetime) -> str:
@@ -113,28 +146,40 @@ class Event(_Msg):
 
     @model_validator(mode="after")
     def _rules(self):
-        allowed = EVENT_TYPES.get(self.incident_type)
+        inc = self.incident_type
+        allowed = EVENT_TYPES.get(inc) or PROPOSED_EVENT_TYPES.get(inc)
         if allowed is None:
-            raise ValueError(f"incident_type '{self.incident_type}' не согласован с BE: {sorted(EVENT_TYPES)}")
+            raise ValueError(f"incident_type '{inc}' не согласован с BE: {sorted(EVENT_TYPES)} "
+                             f"(предложены: {sorted(PROPOSED_EVENT_TYPES)})")
         if self.event_type not in allowed:
-            raise ValueError(f"{self.incident_type}: event_type '{self.event_type}' недопустим, можно {sorted(allowed)}")
-        if self.incident_type == "zone_intrusion" and (self.zone_id is None or self.zone_version is None):
-            raise ValueError("zone_intrusion: нужны zone_id и zone_version")
-        if self.incident_type != "zone_intrusion" and (self.zone_id or self.zone_version is not None):
-            raise ValueError("zone_id / zone_version — только у zone_intrusion")
+            raise ValueError(f"{inc}: event_type '{self.event_type}' недопустим, можно {sorted(allowed)}")
+        if not is_agreed(inc) and self.schema_version != "1.1":
+            raise ValueError(f"{inc} — тип schema 1.1, а schema_version {self.schema_version}")
+        for name, owners in EXTRA_FIELDS.items():
+            if getattr(self, name) is not None:
+                if self.schema_version == "1.0":
+                    raise ValueError(f"поле {name} — только в schema 1.1")
+                if inc not in owners:
+                    raise ValueError(f"поле {name} — только у {sorted(owners)}")
+        missing = [f for f in REQUIRED_EXTRA.get(inc, ()) if getattr(self, f) is None]
+        if missing:
+            raise ValueError(f"{inc}: нужны {missing}")
+        if inc in ZONE_TYPES and (self.zone_id is None or self.zone_version is None):
+            raise ValueError(f"{inc}: нужны zone_id и zone_version")
+        if inc not in ZONE_TYPES and (self.zone_id or self.zone_version is not None):
+            raise ValueError(f"zone_id / zone_version — только у {sorted(ZONE_TYPES)}")
         if self.incident_type == "fight" and not self.episode_id:
             raise ValueError("fight: нужен episode_id")
         if self.incident_type != "fight" and self.episode_id:
             raise ValueError("episode_id — только у fight")
-        if self.incident_type == "fire":
-            if self.bbox is None:
-                raise ValueError("fire: нужен bbox очага")
-            if self.participants:
-                raise ValueError("fire: participants пустой")
-        elif self.bbox is not None:
-            raise ValueError("bbox события — только у fire (schema 1.0)")
-        elif not self.participants:
-            raise ValueError(f"{self.incident_type}: нужен хотя бы один участник")
+        if inc == "fire" and self.bbox is None:
+            raise ValueError("fire: нужен bbox очага")
+        if inc != "fire" and self.bbox is not None:
+            raise ValueError("bbox события — только у fire")
+        if inc in NO_PARTICIPANTS and self.participants:
+            raise ValueError(f"{inc}: participants пустой")
+        if inc not in NO_PARTICIPANTS and not self.participants:
+            raise ValueError(f"{inc}: нужен хотя бы один участник")
         return self
 
 

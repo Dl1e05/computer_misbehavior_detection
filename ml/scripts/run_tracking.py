@@ -48,9 +48,16 @@ SKELETON = [(5, 7), (7, 9), (6, 8), (8, 10), (5, 6), (5, 11), (6, 12), (11, 12),
 
 
 def draw(img: np.ndarray, cam_id: str, ts: str, tracks, zones=(), alert_ids=(),
-         poses=None, phases=None) -> np.ndarray:
+         poses=None, phases=None, lines=(), note: str = "") -> np.ndarray:
     img = img.copy()
     h, w = img.shape[:2]
+    for ln in lines:                                   # линия: p1 -> p2, стрелка показывает «in» (слева направо)
+        (x1, y1), (x2, y2) = [(int(x * w), int(y * h)) for x, y in ln.points]
+        cv2.line(img, (x1, y1), (x2, y2), (255, 200, 0), 3)
+        mx, my, dx, dy = (x1 + x2) // 2, (y1 + y2) // 2, x2 - x1, y2 - y1
+        n = max((dx * dx + dy * dy) ** 0.5, 1)
+        cv2.arrowedLine(img, (mx, my), (int(mx - dy / n * 40), int(my + dx / n * 40)), (255, 200, 0), 2)
+        cv2.putText(img, ln.line_id, (x1, y1 - 8), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255, 200, 0), 2)
     for z in zones:
         pts = np.array([(x * w, y * h) for x, y in z.polygon], np.int32)
         overlay = img.copy()
@@ -74,8 +81,8 @@ def draw(img: np.ndarray, cam_id: str, ts: str, tracks, zones=(), alert_ids=(),
             cv2.putText(img, phase, (x1, y2 + 22), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 255), 2)
         fx, fy = foot_point(t.bbox, w, h)
         cv2.circle(img, (int(fx * w), int(fy * h)), 6, (0, 0, 255) if t.track_id in alert_ids else c, -1)
-    cv2.putText(img, f"{cam_id}  {ts}  persons: {len(tracks)}", (10, 30),
-                cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 0), 2)
+    cv2.putText(img, f"{cam_id}  {ts}  persons: {len(tracks)}  {note}", (10, 30),
+                cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 0) if not note.startswith("TAMPER") else (0, 0, 255), 2)
     return img
 
 
@@ -168,8 +175,11 @@ def main() -> None:
                     for r in o.rules:
                         if hasattr(r, "phase_of"):
                             phases.update({t.track_id: r.phase_of(t.track_id) for t in o.tracks})
+                    cam_lines = [ln for r in o.rules for ln in getattr(r, "lines", {}).values()]
+                    tamper = next((r.state for r in o.rules if r.incident_type == "camera_tampering"), None)
+                    note = f"TAMPER: {tamper}" if tamper not in (None, "normal") else ""
                     last_tile[cid] = draw(o.frame.image, cid, o.frame.ts_iso, o.tracks, cam_zones, hot,
-                                          o.poses, phases)
+                                          o.poses, phases, cam_lines, note)
             if not args.no_show and last_tile:
                 cv2.imshow("tracking", grid([last_tile[c["id"]] for c in cams if c["id"] in last_tile]))
                 if cv2.waitKey(1) & 0xFF in (ord("q"), 27):

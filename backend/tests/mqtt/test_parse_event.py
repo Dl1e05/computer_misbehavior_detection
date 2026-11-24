@@ -93,6 +93,8 @@ def test_null_participant_confidence_counts_as_missing() -> None:
         ({"camera_id": ""}, FailureCode.UNKNOWN_CAMERA),
         ({"occurred_at": "yesterday"}, FailureCode.INVALID_TIMESTAMP),
         ({"sent_at": "yesterday"}, FailureCode.INVALID_TIMESTAMP),
+        ({"occurred_at": "0001-01-01T00:00:00Z"}, FailureCode.INVALID_TIMESTAMP),
+        ({"occurred_at": "0001-01-01T00:00:01Z"}, None),
         ({"zone_id": 7}, FailureCode.INVALID_ZONE),
         ({"participants": "17"}, FailureCode.INVALID_PARTICIPANTS),
         ({"model_version": "x" * 129}, FailureCode.INVALID_FIELD),

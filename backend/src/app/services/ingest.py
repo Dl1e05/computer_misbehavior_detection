@@ -194,16 +194,15 @@ async def _accept(
 def _warn_if_skewed(
     event: MlEvent, received_at: datetime, timings: IncidentTimings
 ) -> None:
-    # V10, §6.6: a warning only, never a rejection. Either clock may be ahead.
-    skew = received_at - event.occurred_at
-    if abs(skew) > timings.clock_skew_warn:
+    # V10, §6.6: a warning only, never a rejection.
+    if timings.is_skewed(event.occurred_at, received_at):
         logger.warning(
             "clock skew: camera=%s event=%s occurred_at=%s received_at=%s skew=%.3fs",
             event.camera_id,
             event.event_id,
             event.occurred_at.isoformat(),
             received_at.isoformat(),
-            skew.total_seconds(),
+            (received_at - event.occurred_at).total_seconds(),
         )
 
 

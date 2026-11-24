@@ -18,9 +18,9 @@ from app.db.models import (
     Zone,
 )
 from app.domain.audit import AuditObjectType, AuditResult
+from app.domain.event import TYPES_WITHOUT_PARTICIPANTS
 from app.domain.incident import (
     IncidentStatus,
-    IncidentType,
     TimerKind,
     severity_for,
 )
@@ -46,6 +46,10 @@ class IncidentTimings:
             clock_skew_warn=timedelta(seconds=settings.clock_skew_warn_seconds),
         )
 
+    def is_skewed(self, occurred_at: datetime, received_at: datetime) -> bool:
+        # Either clock may be ahead.
+        return abs(received_at - occurred_at) > self.clock_skew_warn
+
 
 async def create_from_detection(
     session: AsyncSession,
@@ -67,6 +71,8 @@ async def create_from_detection(
     if allowed is not TransitionResult.ALLOWED:
         raise ValueError(f"{event.incident_type} cannot be created as NEW")
 
+    # Every detection creates an incident for now; attaching repeats (BE-FR-19)
+    # needs OQ-04 first.
     incident = Incident(
         incident_type=event.incident_type,
         severity=severity_for(event.incident_type),
@@ -76,8 +82,10 @@ async def create_from_detection(
         zone_version=event.zone_version if zone is not None else None,
         model_version=event.model_version,
         confidence=event.confidence,
-        # Only fire has no participant to carry the box.
-        bbox=event.bbox if event.incident_type is IncidentType.FIRE else None,
+        # Other types always have participants, which carry the boxes.
+        bbox=(
+            event.bbox if event.incident_type in TYPES_WITHOUT_PARTICIPANTS else None
+        ),
         occurred_at=event.occurred_at,
         created_received_at=received_at,
     )
@@ -107,8 +115,8 @@ def _clip_window(
     occurred_at: datetime, received_at: datetime, timings: IncidentTimings
 ) -> tuple[datetime, datetime]:
     # §13.4: with a large skew ML's clock cannot be trusted.
-    skew = abs(received_at - occurred_at)
-    trigger = occurred_at if skew <= timings.clock_skew_warn else received_at
+    skewed = timings.is_skewed(occurred_at, received_at)
+    trigger = received_at if skewed else occurred_at
     return trigger - timings.clip_pre_roll, trigger + timings.clip_post_roll
 
 

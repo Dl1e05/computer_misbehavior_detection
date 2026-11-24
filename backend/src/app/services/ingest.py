@@ -10,6 +10,7 @@ import json
 import logging
 import uuid
 from dataclasses import dataclass
+from datetime import datetime
 from enum import StrEnum
 from typing import Any
 
@@ -18,7 +19,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models import AuditEntry, Camera, DeadLetter, ProcessedEvent, Zone
 from app.domain.audit import AuditObjectType, AuditResult
-from app.domain.event import FailureCode
+from app.domain.event import EventType, FailureCode
 from app.mqtt.events import (
     FACE_FIELDS,
     EventLimits,
@@ -26,6 +27,7 @@ from app.mqtt.events import (
     Rejection,
     parse_event,
 )
+from app.services.incidents import IncidentTimings, create_from_detection
 
 logger = logging.getLogger(__name__)
 
@@ -50,12 +52,18 @@ class IngestOutcome:
 
 
 async def ingest_event(
-    session: AsyncSession, raw: bytes, *, topic: str, limits: EventLimits
+    session: AsyncSession,
+    raw: bytes,
+    *,
+    topic: str,
+    limits: EventLimits,
+    timings: IncidentTimings,
 ) -> IngestOutcome:
     """Validate and record one event; write nothing that cannot be stored.
 
-    Every path ends in exactly one of: a processed_events row (accepted),
-    nothing new (duplicate), or a dead_letters row (rejected).
+    Every path ends in exactly one of: a processed_events row (accepted, with
+    the incident of a detection), nothing new (duplicate), or a dead_letters
+    row (rejected).
     """
     payload_hash = hashlib.sha256(raw).hexdigest()
 
@@ -101,41 +109,79 @@ async def ingest_event(
 
     # V11, second half. Checked whenever zone_id is present, not only for
     # zone_intrusion, so no incident ever points at another camera's zone.
-    if event.zone_id is not None and not await _zone_is_usable(
-        session, event.zone_id, camera.id
-    ):
-        return await reject(
-            Rejection(
-                FailureCode.INVALID_ZONE,
-                "zone_id: unknown, inactive or of another camera",
+    zone: Zone | None = None
+    if event.zone_id is not None:
+        zone = await _usable_zone(session, event.zone_id, camera.id)
+        if zone is None:
+            return await reject(
+                Rejection(
+                    FailureCode.INVALID_ZONE,
+                    "zone_id: unknown, inactive or of another camera",
+                )
             )
-        )
 
-    return await _accept(session, event, payload_hash)
+    return await _accept(
+        session,
+        event,
+        payload_hash=payload_hash,
+        camera=camera,
+        zone=zone,
+        received_at=limits.received_at,
+        timings=timings,
+    )
 
 
-async def _zone_is_usable(
+async def _usable_zone(
     session: AsyncSession, zone_id: str, camera_id: uuid.UUID
-) -> bool:
+) -> Zone | None:
     # zone_id is the Zone's UUID, as ML reads it from GET /ml/cameras-zones.
     try:
         zone_uuid = uuid.UUID(zone_id)
     except ValueError:
-        return False
+        return None
     zone = await session.get(Zone, zone_uuid)
-    return zone is not None and zone.camera_id == camera_id and zone.active
+    if zone is None or zone.camera_id != camera_id or not zone.active:
+        return None
+    return zone
 
 
 async def _accept(
-    session: AsyncSession, event: MlEvent, payload_hash: str
+    session: AsyncSession,
+    event: MlEvent,
+    *,
+    payload_hash: str,
+    camera: Camera,
+    zone: Zone | None,
+    received_at: datetime,
+    timings: IncidentTimings,
 ) -> IngestOutcome:
-    # 10b adds the incident and its id to the result. Build the whole result
-    # before adding the row: the JSONB column does not track later in-place
-    # changes, so the caller gets a copy.
+    _warn_if_skewed(event, received_at, timings)
+
+    # Fight events are only recorded for now: suspicion and confirmation have
+    # transitions of their own (OQ-19).
+    incident_id: uuid.UUID | None = None
+    if event.event_type is EventType.DETECTION:
+        incident = await create_from_detection(
+            session,
+            event,
+            camera=camera,
+            zone=zone,
+            received_at=received_at,
+            timings=timings,
+        )
+        incident_id = incident.id
+
+    # Build the whole result before adding the row: the JSONB column does not
+    # track later in-place changes, so the caller gets a copy.
     # If two copies of one event race, the second INSERT hits the primary key
-    # and its transaction rolls back; unacknowledged, the copy comes back and
-    # is a DUPLICATE.
-    result: dict[str, Any] = {"outcome": "accepted"}
+    # and its transaction rolls back, incident included; unacknowledged, the
+    # copy comes back and is a DUPLICATE.
+    result: dict[str, Any] = {
+        "outcome": "accepted",
+        "incident_id": str(incident_id) if incident_id is not None else None,
+        "event_type": event.event_type.value,
+        "run_id": event.run_id,
+    }
     session.add(
         ProcessedEvent(
             event_id=event.event_id, payload_hash=payload_hash, result=result
@@ -143,6 +189,21 @@ async def _accept(
     )
     await session.flush()
     return IngestOutcome(IngestStatus.ACCEPTED, result=dict(result))
+
+
+def _warn_if_skewed(
+    event: MlEvent, received_at: datetime, timings: IncidentTimings
+) -> None:
+    # V10, §6.6: a warning only, never a rejection.
+    if timings.is_skewed(event.occurred_at, received_at):
+        logger.warning(
+            "clock skew: camera=%s event=%s occurred_at=%s received_at=%s skew=%.3fs",
+            event.camera_id,
+            event.event_id,
+            event.occurred_at.isoformat(),
+            received_at.isoformat(),
+            (received_at - event.occurred_at).total_seconds(),
+        )
 
 
 async def _reject(

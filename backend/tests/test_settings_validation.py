@@ -74,3 +74,16 @@ def test_future_limit_must_not_be_below_skew_warning() -> None:
     # would contradict that.
     with pytest.raises(ValidationError, match="EVENT_MAX_FUTURE_SECONDS"):
         make_settings(clock_skew_warn_seconds=120, event_max_future_seconds=60)
+
+
+def test_clip_window_must_not_be_empty() -> None:
+    # The clips table refuses an empty window, so no alarm could be saved.
+    with pytest.raises(ValidationError, match="CLIP_PRE_ROLL_SECONDS"):
+        make_settings(clip_pre_roll_seconds=0, clip_post_roll_seconds=0)
+
+
+@pytest.mark.parametrize(("pre", "post"), [(0, 5), (5, 0)])
+def test_clip_window_may_be_one_sided(pre: int, post: int) -> None:
+    settings = make_settings(clip_pre_roll_seconds=pre, clip_post_roll_seconds=post)
+    assert settings.clip_pre_roll_seconds == pre
+    assert settings.clip_post_roll_seconds == post

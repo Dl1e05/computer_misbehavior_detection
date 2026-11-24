@@ -2,6 +2,7 @@ import itertools
 
 import pytest
 
+from app.domain.event import INCIDENT_TYPES_BY_EVENT_TYPE, EventType
 from app.domain.incident import TERMINAL_STATUSES, IncidentStatus, IncidentType, Role
 from app.domain.state_machine import (
     TRANSITIONS,
@@ -257,3 +258,10 @@ def test_terminal_statuses_have_no_actions() -> None:
         Role, TERMINAL_STATUSES, IncidentType
     ):
         assert allowed_actions(role, status, incident_type) == set()
+
+
+def test_detection_types_match_the_transition_table() -> None:
+    # V7 and T2 list the same types. A type allowed only by V7 would fail at
+    # creation, so its message would come back forever.
+    rule = TRANSITIONS[(None, IncidentStatus.NEW)]
+    assert INCIDENT_TYPES_BY_EVENT_TYPE[EventType.DETECTION] == rule.incident_types

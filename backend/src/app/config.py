@@ -98,6 +98,16 @@ class Settings(BaseSettings):
             )
         return self
 
+    @model_validator(mode="after")
+    def _clip_window_not_empty(self) -> Self:
+        # The clips table requires end_at > start_at. An empty window would
+        # make every alarm fail to save, so its event would come back forever.
+        if self.clip_pre_roll_seconds + self.clip_post_roll_seconds == 0:
+            raise ValueError(
+                "CLIP_PRE_ROLL_SECONDS + CLIP_POST_ROLL_SECONDS must be > 0"
+            )
+        return self
+
     @property
     def database_url(self) -> URL:
         return self._url(self.db_user, self.db_password)

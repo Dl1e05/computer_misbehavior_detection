@@ -1,9 +1,10 @@
 """The ML → BE event contract, as received over MQTT (SRS §7.2–7.4).
 
 These models check what a message can be checked against on its own.
-Checks that need the database (V8 camera, V11 zone ownership, V14 repeat
-events, V16 idempotency, V17 transition) belong to event processing
-(app.services.ingest).
+Checks that need the database (V8 camera, V11 zone ownership, V16
+idempotency, V17 transition) belong to event processing
+(app.services.ingest). V14 needs no database: ML sends face data in a message
+of its own, so an event never carries any. V15 belongs to that message.
 
 Rule violations are raised as PydanticCustomError whose error type is the
 SRS failure code, so the caller can read the code straight from the error.
@@ -13,9 +14,10 @@ import re
 import uuid
 from dataclasses import dataclass
 from datetime import datetime, timedelta
-from typing import Self
+from typing import Annotated, Any, Self
 
 from pydantic import (
+    AfterValidator,
     AwareDatetime,
     BaseModel,
     ConfigDict,
@@ -50,6 +52,15 @@ _CONTRACT_CONFIG = ConfigDict(
 # ASCII digits only: \d would also match e.g. Arabic-Indic digits.
 _SCHEMA_VERSION = re.compile(r"([0-9]+)\.([0-9]+)")
 
+# V14: face data of a participant; not allowed in any event.
+FACE_FIELDS = ("embedding", "embedding_model_version", "snapshot_ref")
+
+# The zone version column is a Postgres integer: a larger number would fail to
+# save, so the message would never be acknowledged and would come back forever.
+_INT32_MAX = 2**31 - 1
+# Agreed range of track ids (stored as text, so not a column limit).
+_INT64_MAX = 2**63 - 1
+
 
 @dataclass(frozen=True)
 class EventLimits:
@@ -58,7 +69,6 @@ class EventLimits:
     MlEvent.model_validate_json(raw, context=EventLimits(...))
     """
 
-    embedding_dim: int
     received_at: datetime
     max_future: timedelta
 
@@ -67,8 +77,8 @@ class EventLimits:
         # beats crashing later on every valid event.
         if self.received_at.utcoffset() is None:
             raise ValueError("received_at must have a timezone")
-        if self.embedding_dim <= 0 or self.max_future < timedelta(0):
-            raise ValueError("embedding_dim must be > 0 and max_future >= 0")
+        if self.max_future < timedelta(0):
+            raise ValueError("max_future must be >= 0")
 
 
 def _fail(code: FailureCode, message: str) -> PydanticCustomError:
@@ -92,20 +102,44 @@ def _limits(info: ValidationInfo) -> EventLimits:
     return info.context
 
 
+def _ordered(box: list[float]) -> list[float]:
+    if not (box[0] < box[2] and box[1] < box[3]):
+        raise ValueError("bbox must be [x1, y1, x2, y2] with x1 < x2 and y1 < y2")
+    return box
+
+
+# [x1, y1, x2, y2] as fractions of the frame (0..1), top left to bottom right.
+NormalizedBox = Annotated[
+    list[Annotated[float, Field(ge=0, le=1)]],
+    Field(min_length=4, max_length=4),
+    AfterValidator(_ordered),
+]
+
+
 class Participant(BaseModel):
     model_config = _CONTRACT_CONFIG
 
-    # ByteTrack id, stable within the camera session.
-    track_id: str = Field(min_length=1)
+    # ByteTrack id, counted from 0; unique only together with run_id.
+    track_id: int = Field(ge=0, le=_INT64_MAX)
     # Detection or track confidence; not an identity score.
     confidence: float = Field(ge=0, le=1)
-    # [x1, y1, x2, y2]. Units (pixels or 0..1) are pending with the ML team.
-    bbox: list[float] | None = Field(default=None, min_length=4, max_length=4)
-    # Storage key of the face snapshot, never a URL.
-    snapshot_ref: str | None = None
-    # Face embedding; allowed only on some events (V14), D long (V15).
-    embedding: list[float] | None = None
-    embedding_model_version: str | None = None
+    bbox: NormalizedBox | None = None
+    # FACE_FIELDS. Declared only to be refused; Any, so that malformed face
+    # data is reported as face data too.
+    embedding: Any = None
+    embedding_model_version: Any = None
+    snapshot_ref: Any = None
+
+    # Above _no_nul: validators run in this order, and the first error wins.
+    @field_validator(*FACE_FIELDS)
+    @classmethod
+    def _no_face_data(cls, value: object) -> object:
+        # V14
+        if value is not None:
+            raise _fail(
+                FailureCode.BIOMETRIC_NOT_ALLOWED, "face data is not allowed in events"
+            )
+        return value
 
     @field_validator("*")
     @classmethod
@@ -124,12 +158,20 @@ class MlEvent(BaseModel):
     # AwareDatetime refuses a time without a timezone.
     occurred_at: AwareDatetime
     incident_type: IncidentType
+    # One run of the ML process; track ids start again in the next run.
+    run_id: str = Field(min_length=1, max_length=128)
     zone_id: str | None = None
+    # Version of the zone that ML used; not required, an old one is no fault.
+    zone_version: int | None = Field(default=None, ge=0, le=_INT32_MAX)
     # Detection pipeline version, e.g. "fight-temporal-1.3.0/yolo26-det-2.0.1".
     model_version: str = Field(min_length=1, max_length=128)
+    # Confidence of the whole event; not an identity score.
+    confidence: float | None = Field(default=None, ge=0, le=1)
+    # Where the fire is. Other types have boxes on their participants.
+    bbox: NormalizedBox | None = None
     participants: list[Participant] = Field(default_factory=list)
     sent_at: AwareDatetime | None = None
-    # Links a fight suspicion to its confirmation (proposed by the ML team).
+    # Links a fight suspicion to its confirmation.
     episode_id: str | None = None
 
     @field_validator("*")
@@ -173,25 +215,11 @@ class MlEvent(BaseModel):
     @model_validator(mode="after")
     def _cross_field_rules(self, info: ValidationInfo) -> Self:
         limits = _limits(info)
-        self._check_conditional_fields()
         self._check_stage_type_pair()
         self._check_not_in_future(limits)
         self._check_zone()
         self._check_participants()
-        self._check_embeddings(limits)
         return self
-
-    def _check_conditional_fields(self) -> None:
-        # V2: embedding_model_version is required when embedding is present.
-        for participant in self.participants:
-            if (
-                participant.embedding is not None
-                and participant.embedding_model_version is None
-            ):
-                raise _fail(
-                    FailureCode.MISSING_FIELD,
-                    "embedding_model_version is required with embedding",
-                )
 
     def _check_stage_type_pair(self) -> None:
         # V7
@@ -228,26 +256,6 @@ class MlEvent(BaseModel):
                 f"{self.incident_type} needs at least one participant",
             )
 
-    def _check_embeddings(self, limits: EventLimits) -> None:
-        embeddings = [
-            participant.embedding
-            for participant in self.participants
-            if participant.embedding is not None
-        ]
-        # V14: never on a suspicion (D-06). Repeat events need the DB.
-        if embeddings and self.event_type is EventType.SUSPICION:
-            raise _fail(
-                FailureCode.BIOMETRIC_NOT_ALLOWED,
-                "embeddings are not allowed on a suspicion",
-            )
-        # V15: exactly D numbers ("all finite" is allow_inf_nan=False).
-        for embedding in embeddings:
-            if len(embedding) != limits.embedding_dim:
-                raise _fail(
-                    FailureCode.INVALID_EMBEDDING,
-                    f"embedding must have {limits.embedding_dim} numbers",
-                )
-
 
 @dataclass(frozen=True)
 class Rejection:
@@ -273,12 +281,12 @@ _EVENT_FIELD_CODES: dict[str, FailureCode] = {
     "occurred_at": FailureCode.INVALID_TIMESTAMP,
     "sent_at": FailureCode.INVALID_TIMESTAMP,
     "zone_id": FailureCode.INVALID_ZONE,
+    "zone_version": FailureCode.INVALID_ZONE,
+    "confidence": FailureCode.INVALID_CONFIDENCE,
     "participants": FailureCode.INVALID_PARTICIPANTS,
 }
 _PARTICIPANT_FIELD_CODES: dict[str, FailureCode] = {
     "confidence": FailureCode.INVALID_CONFIDENCE,
-    "embedding": FailureCode.INVALID_EMBEDDING,
-    "embedding_model_version": FailureCode.INVALID_EMBEDDING,
 }
 # Rank of each code in V order (FailureCode is declared in that order).
 _RANK = {code: rank for rank, code in enumerate(FailureCode)}

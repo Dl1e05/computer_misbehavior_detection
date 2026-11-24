@@ -7,9 +7,7 @@ import pytest
 from app.domain.event import FailureCode
 from app.mqtt.events import EventLimits, MlEvent, Rejection, parse_event
 
-DIM = 4
 LIMITS = EventLimits(
-    embedding_dim=DIM,
     received_at=datetime(2026, 10, 25, 9, 14, 4, tzinfo=UTC),
     max_future=timedelta(seconds=60),
 )
@@ -23,8 +21,9 @@ def valid_event() -> dict[str, Any]:
         "camera_id": "cam-02",
         "occurred_at": "2026-10-25T09:14:03.217Z",
         "incident_type": "fall",
+        "run_id": "run-1",
         "model_version": "fall-1.0",
-        "participants": [{"track_id": "17", "confidence": 0.91}],
+        "participants": [{"track_id": 17, "confidence": 0.91}],
     }
 
 
@@ -67,7 +66,7 @@ def test_missing_field() -> None:
     assert code_for(payload) is FailureCode.MISSING_FIELD
 
 
-@pytest.mark.parametrize("field", ["event_id", "event_type", "occurred_at"])
+@pytest.mark.parametrize("field", ["event_id", "event_type", "occurred_at", "run_id"])
 def test_null_counts_as_missing(field: str) -> None:
     # "present and non-null": a null would otherwise be reported as a bad type.
     assert code_for(valid_event() | {field: None}) is FailureCode.MISSING_FIELD
@@ -94,6 +93,11 @@ def test_null_participant_confidence_counts_as_missing() -> None:
         ({"participants": "17"}, FailureCode.INVALID_PARTICIPANTS),
         ({"model_version": "x" * 129}, FailureCode.INVALID_FIELD),
         ({"episode_id": 5}, FailureCode.INVALID_FIELD),
+        ({"run_id": "r" * 129}, FailureCode.INVALID_FIELD),
+        ({"bbox": [0.1, 0.1, 1.1, 0.9]}, FailureCode.INVALID_FIELD),
+        ({"bbox": [0.9, 0.1, 0.1, 0.9]}, FailureCode.INVALID_FIELD),
+        ({"zone_version": 2**31}, FailureCode.INVALID_ZONE),
+        ({"confidence": 1.5}, FailureCode.INVALID_CONFIDENCE),
         # null in an optional field is that field's error, not "missing".
         ({"participants": None}, FailureCode.INVALID_PARTICIPANTS),
         ({"zone_id": None, "sent_at": None}, None),
@@ -114,15 +118,15 @@ def test_field_error_codes(
     [
         ({"confidence": 1.5}, FailureCode.INVALID_CONFIDENCE),
         ({"confidence": "0.9"}, FailureCode.INVALID_CONFIDENCE),
-        ({"track_id": ""}, FailureCode.INVALID_PARTICIPANTS),
-        ({"bbox": [1.0, 2.0]}, FailureCode.INVALID_PARTICIPANTS),
-        ({"embedding": "abc"}, FailureCode.INVALID_EMBEDDING),
+        ({"track_id": "17"}, FailureCode.INVALID_PARTICIPANTS),
+        ({"track_id": -1}, FailureCode.INVALID_PARTICIPANTS),
+        ({"track_id": None}, FailureCode.MISSING_FIELD),
+        ({"bbox": [0.1, 0.2]}, FailureCode.INVALID_PARTICIPANTS),
+        ({"bbox": [0.9, 0.1, 0.1, 0.9]}, FailureCode.INVALID_PARTICIPANTS),
+        ({"embedding": "abc"}, FailureCode.BIOMETRIC_NOT_ALLOWED),
+        ({"snapshot_ref": "snapshots/17.jpg"}, FailureCode.BIOMETRIC_NOT_ALLOWED),
         # A null inside a list is that list's error, not a missing field.
-        (
-            {"embedding": [1.0, 2.0, None, 4.0], "embedding_model_version": "v1"},
-            FailureCode.INVALID_EMBEDDING,
-        ),
-        ({"bbox": [None, 1.0, 2.0, 3.0]}, FailureCode.INVALID_PARTICIPANTS),
+        ({"bbox": [None, 0.1, 0.2, 0.3]}, FailureCode.INVALID_PARTICIPANTS),
     ],
 )
 def test_participant_error_codes(
@@ -163,6 +167,11 @@ def test_rule_error_codes_pass_through() -> None:
             FailureCode.MISSING_FIELD,
             id="V2 in a participant before V6",
         ),
+        pytest.param(
+            {"participants": [{"track_id": 1, "confidence": 2, "embedding": [0.1]}]},
+            FailureCode.INVALID_CONFIDENCE,
+            id="V13 before V14",
+        ),
     ],
 )
 def test_first_failure_in_v_order_wins(
@@ -181,9 +190,9 @@ def test_detail_names_the_field() -> None:
 def test_detail_never_contains_input_values() -> None:
     # An embedding must never reach logs or dead letters (SRS §14).
     secret = 0.123456789
-    payload = valid_event() | {"event_type": "suspicion", "incident_type": "fight"}
+    payload = valid_event()
     payload["participants"][0] |= {
-        "embedding": [secret] * DIM,
+        "embedding": [secret] * 4,
         "embedding_model_version": "insightface-1.0",
     }
     rejection = rejected(json.dumps(payload).encode())
@@ -226,17 +235,12 @@ def test_known_deviation_cross_field_rule_next_to_field_error() -> None:
         ("camera_id", FailureCode.UNKNOWN_CAMERA),
         ("model_version", FailureCode.INVALID_FIELD),
         ("zone_id", FailureCode.INVALID_ZONE),
+        ("run_id", FailureCode.INVALID_FIELD),
     ],
 )
 def test_nul_in_text_is_rejected(field: str, expected: FailureCode) -> None:
     # Postgres cannot store U+0000; saving it would fail on every redelivery.
     assert code_for(valid_event() | {field: "a\x00b"}) is expected
-
-
-def test_nul_in_participant_text_is_rejected() -> None:
-    payload = valid_event()
-    payload["participants"][0]["track_id"] = "17\x00"
-    assert code_for(payload) is FailureCode.INVALID_PARTICIPANTS
 
 
 @pytest.mark.parametrize("version", ["1.0\n", "\u0661.0", " 1.0"])
@@ -249,7 +253,6 @@ def test_limits_need_an_aware_received_at() -> None:
     # A naive time would crash later, and only on valid events.
     with pytest.raises(ValueError, match="timezone"):
         EventLimits(
-            embedding_dim=DIM,
             received_at=datetime(2026, 10, 25, 9, 14, 4),
             max_future=timedelta(seconds=60),
         )

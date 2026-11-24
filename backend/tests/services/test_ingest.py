@@ -15,11 +15,8 @@ from app.domain.event import FailureCode
 from app.mqtt.events import EventLimits
 from app.services.ingest import IngestOutcome, IngestStatus, ingest_event
 
-DIM = 4
 RECEIVED_AT = datetime(2026, 10, 25, 9, 14, 4, tzinfo=UTC)
-LIMITS = EventLimits(
-    embedding_dim=DIM, received_at=RECEIVED_AT, max_future=timedelta(seconds=60)
-)
+LIMITS = EventLimits(received_at=RECEIVED_AT, max_future=timedelta(seconds=60))
 TOPIC = "videoanalytics/v1/cameras/cam-01/events"
 EVENT_ID = "5f0c2a7e-3b9d-4c1a-9e8f-2d7b6a1c0e42"
 
@@ -33,15 +30,16 @@ def event(**changes: Any) -> dict[str, Any]:
         "camera_id": "cam-01",
         "occurred_at": "2026-10-25T09:14:03.217Z",
         "incident_type": "fall",
+        "run_id": "run-1",
         "model_version": "fall-1.0",
-        "participants": [{"track_id": "17", "confidence": 0.91}],
+        "participants": [{"track_id": 17, "confidence": 0.91}],
     } | changes
 
 
-def fight_with_embedding(event_type: str, length: int = DIM) -> dict[str, Any]:
-    payload = event(event_type=event_type, incident_type="fight")
+def event_with_embedding(**changes: Any) -> dict[str, Any]:
+    payload = event(**changes)
     payload["participants"][0] |= {
-        "embedding": [0.123456789] * length,
+        "embedding": [0.123456789] * 4,
         "embedding_model_version": "insightface-buffalo_l-1.0",
     }
     return payload
@@ -166,7 +164,8 @@ async def test_malformed_message_is_kept_as_hash_only(
 async def test_srs_invalid_fixture_reports_first_failure(
     db_session: AsyncSession,
 ) -> None:
-    # SRS §7.7 (T-EV-01): several faults, V4 comes first.
+    # SRS §7.7 (T-EV-01): several faults, V4 comes first. run_id and the
+    # integer track_id were agreed with ML later; without them V2 is first.
     payload = {
         "schema_version": "1.0",
         "event_id": "not-a-uuid",
@@ -174,10 +173,11 @@ async def test_srs_invalid_fixture_reports_first_failure(
         "camera_id": "cam-09",
         "occurred_at": "25.10.2026 09:14",
         "incident_type": "fall",
+        "run_id": "run-1",
         "model_version": "fall-pose-1.0.0",
         "participants": [
             {
-                "track_id": "17",
+                "track_id": 17,
                 "confidence": 0.77,
                 "embedding": [0.1, 0.2],
                 "embedding_model_version": "insightface-buffalo_l-1.0",
@@ -282,14 +282,19 @@ async def test_zone_is_checked_on_any_incident_type(
     assert outcome.code is FailureCode.INVALID_ZONE
 
 
-# V14 and embeddings
+# V14 and face data
 
 
 @pytest.mark.usefixtures("camera_id")
-async def test_embedding_on_suspicion_is_a_privacy_violation(
-    db_session: AsyncSession,
+@pytest.mark.parametrize(
+    ("event_type", "incident_type"),
+    [("suspicion", "fight"), ("confirmation", "fight"), ("detection", "fall")],
+)
+async def test_embedding_in_any_event_is_a_privacy_violation(
+    db_session: AsyncSession, event_type: str, incident_type: str
 ) -> None:
-    outcome = await ingest(db_session, encode(fight_with_embedding("suspicion")))
+    payload = event_with_embedding(event_type=event_type, incident_type=incident_type)
+    outcome = await ingest(db_session, encode(payload))
 
     assert outcome.code is FailureCode.BIOMETRIC_NOT_ALLOWED
     dead_letter = await only_dead_letter(db_session)
@@ -308,18 +313,45 @@ async def test_embedding_on_suspicion_is_a_privacy_violation(
 
 
 @pytest.mark.usefixtures("camera_id")
-async def test_embedding_is_never_kept_in_any_dead_letter(
-    db_session: AsyncSession,
+@pytest.mark.parametrize(
+    "face_data",
+    [
+        {"embedding": "malformed"},
+        {"embedding_model_version": "insightface-buffalo_l-1.0"},
+        {"snapshot_ref": "snapshots/17.jpg"},
+    ],
+    ids=lambda face_data: next(iter(face_data)),
+)
+async def test_any_face_field_is_a_privacy_violation(
+    db_session: AsyncSession, face_data: dict[str, Any]
 ) -> None:
-    # Wrong length (V15) on an event where embeddings are allowed.
-    payload = fight_with_embedding("confirmation", length=DIM - 1)
+    payload = event()
+    payload["participants"][0] |= face_data
     outcome = await ingest(db_session, encode(payload))
 
-    assert outcome.code is FailureCode.INVALID_EMBEDDING
-    dead_letter = await only_dead_letter(db_session)
-    assert "0.123456789" not in json.dumps(dead_letter.raw_payload)
+    assert outcome.code is FailureCode.BIOMETRIC_NOT_ALLOWED
+    assert (await only_audit_entry(db_session)).action == "event.privacy_violation"
+
+
+@pytest.mark.usefixtures("camera_id")
+async def test_rejection_without_face_data_is_not_audited(
+    db_session: AsyncSession,
+) -> None:
     # Only the privacy violation is audited, not every rejection.
+    payload = event(model_version="x" * 129)
+    payload["participants"][0] |= {"embedding": None, "snapshot_ref": None}
+    outcome = await ingest(db_session, encode(payload))
+
+    assert outcome.code is FailureCode.INVALID_FIELD
     assert await count(db_session, AuditEntry) == 0
+
+
+@pytest.mark.usefixtures("camera_id")
+async def test_null_face_fields_are_accepted(db_session: AsyncSession) -> None:
+    payload = event()
+    payload["participants"][0] |= {"embedding": None, "snapshot_ref": None}
+    outcome = await ingest(db_session, encode(payload))
+    assert outcome.status is IngestStatus.ACCEPTED
 
 
 @pytest.mark.usefixtures("camera_id")
@@ -337,20 +369,18 @@ async def test_dead_letter_with_nan_is_written(db_session: AsyncSession) -> None
     ("changes", "expected"),
     [
         pytest.param(
-            {"model_version": "x" * 129}, FailureCode.INVALID_FIELD, id="field error"
+            {"confidence": 1.5}, FailureCode.INVALID_CONFIDENCE, id="V13 before V14"
         ),
         pytest.param(
-            {"incident_type": "fall"},
-            FailureCode.INVALID_STAGE_TYPE_PAIR,
-            id="earlier V rule",
+            {"event_id": "bad"}, FailureCode.INVALID_EVENT_ID, id="V4 before V14"
         ),
     ],
 )
 async def test_privacy_violation_is_audited_whatever_the_reported_code(
     db_session: AsyncSession, changes: dict[str, Any], expected: FailureCode
 ) -> None:
-    # The embedding was sent on a suspicion even if another fault is reported.
-    payload = fight_with_embedding("suspicion") | changes
+    # The embedding was sent even if another fault is reported.
+    payload = event_with_embedding() | changes
     outcome = await ingest(db_session, encode(payload))
 
     assert outcome.code is expected
@@ -363,7 +393,7 @@ async def test_privacy_violation_keeps_ids_when_payload_is_not_stored(
 ) -> None:
     # U+0000 in an ignored field: the dead letter keeps only the hash, but
     # the audit entry still names the event and camera.
-    payload = fight_with_embedding("suspicion") | {
+    payload = event_with_embedding() | {
         "event_id": EVENT_ID.upper(),
         "note": "a\x00b",
     }
@@ -389,7 +419,7 @@ async def test_privacy_violation_drops_unstorable_camera_id(
     db_session: AsyncSession, camera: object
 ) -> None:
     # The audit insert must not fail either, or the message comes back forever.
-    payload = fight_with_embedding("suspicion") | {"camera_id": camera}
+    payload = event_with_embedding() | {"camera_id": camera}
     outcome = await ingest(db_session, encode(payload))
 
     assert outcome.status is IngestStatus.REJECTED

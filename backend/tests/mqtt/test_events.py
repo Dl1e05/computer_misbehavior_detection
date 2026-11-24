@@ -10,16 +10,14 @@ from app.domain.event import EventType, FailureCode
 from app.domain.incident import IncidentType
 from app.mqtt.events import EventLimits, MlEvent
 
-DIM = 4  # a short embedding keeps the tests readable
 LIMITS = EventLimits(
-    embedding_dim=DIM,
     received_at=datetime(2026, 10, 25, 9, 14, 4, tzinfo=UTC),
     max_future=timedelta(seconds=60),
 )
 
 
 def srs_sample() -> dict[str, Any]:
-    """The example event from SRS §7, as ML would publish it."""
+    """The example event from SRS §7, in the form agreed with the ML team."""
     return {
         "schema_version": "1.0",
         "event_id": "5f0c2a7e-3b9d-4c1a-9e8f-2d7b6a1c0e42",
@@ -27,19 +25,18 @@ def srs_sample() -> dict[str, Any]:
         "camera_id": "cam-02",
         "occurred_at": "2026-10-25T09:14:03.217Z",
         "incident_type": "fight",
+        "run_id": "ml-20261025-091000",
         "model_version": "fight-temporal-1.3.0/yolo26-det-2.0.1/bytetrack-1.0",
         "participants": [
             {
-                "track_id": "17",
+                "track_id": 17,
                 "confidence": 0.91,
-                "bbox": [412.0, 188.5, 498.0, 402.0],
-                "snapshot_ref": "snapshots/2026/10/25/5f0c2a7e-17.jpg",
+                "bbox": [0.25, 0.125, 0.375, 0.5],
             },
             {
-                "track_id": "23",
+                "track_id": 23,
                 "confidence": 0.88,
-                "bbox": [520.0, 175.0, 604.0, 395.0],
-                "snapshot_ref": "snapshots/2026/10/25/5f0c2a7e-23.jpg",
+                "bbox": [0.5, 0.125, 0.75, 0.625],
             },
         ],
     }
@@ -65,24 +62,19 @@ def detection(incident_type: str = "fall", **changes: Any) -> dict[str, Any]:
     }
 
 
-def with_embedding(payload: dict[str, Any], **changes: Any) -> dict[str, Any]:
-    payload["participants"][0] |= {
-        "embedding": [0.1] * DIM,
-        "embedding_model_version": "insightface-buffalo_l-1.0",
-        **changes,
-    }
-    return payload
-
-
 def test_srs_sample_parses() -> None:
     event = parse(srs_sample())
 
     assert event.event_type is EventType.CONFIRMATION
     assert event.incident_type is IncidentType.FIGHT
     assert event.occurred_at.tzinfo is not None
-    assert [p.track_id for p in event.participants] == ["17", "23"]
-    assert event.participants[0].bbox == [412.0, 188.5, 498.0, 402.0]
+    assert event.run_id == "ml-20261025-091000"
+    assert [p.track_id for p in event.participants] == [17, 23]
+    assert event.participants[0].bbox == [0.25, 0.125, 0.375, 0.5]
     assert event.zone_id is None
+    assert event.zone_version is None
+    assert event.confidence is None
+    assert event.bbox is None
     assert event.episode_id is None
 
 
@@ -99,11 +91,11 @@ def test_optional_fields_have_defaults() -> None:
 
 def test_unknown_fields_are_ignored() -> None:
     # A field added in a newer minor schema version must not reject the event.
-    payload = srs_sample() | {"run_id": "run-7"}
+    payload = srs_sample() | {"line_id": "line-7"}
     payload["participants"][0]["new_field"] = 1
 
     event = parse(payload)
-    assert not hasattr(event, "run_id")
+    assert not hasattr(event, "line_id")
 
 
 def test_episode_id_is_kept() -> None:
@@ -111,10 +103,81 @@ def test_episode_id_is_kept() -> None:
     assert event.episode_id == "ep-42"
 
 
-def test_whole_numbers_are_accepted_in_bbox() -> None:
+@pytest.mark.parametrize("track_id", [0, 2**63 - 1])
+def test_track_id_limits_are_accepted(track_id: int) -> None:
     payload = srs_sample()
-    payload["participants"][0]["bbox"] = [412, 188, 498, 402]
-    assert parse(payload).participants[0].bbox == [412.0, 188.0, 498.0, 402.0]
+    payload["participants"][0]["track_id"] = track_id
+    assert parse(payload).participants[0].track_id == track_id
+
+
+def test_whole_numbers_are_accepted_in_bbox() -> None:
+    # The whole frame: 0 and 1 are allowed.
+    payload = srs_sample() | {"bbox": [0, 0, 1, 1]}
+    payload["participants"][0]["bbox"] = [0, 0, 1, 1]
+    event = parse(payload)
+    assert event.bbox == [0.0, 0.0, 1.0, 1.0]
+    assert event.participants[0].bbox == [0.0, 0.0, 1.0, 1.0]
+
+
+INVALID_BOXES = [
+    pytest.param([0.1, 0.1, 0.9], id="3 numbers"),
+    pytest.param([0.1, 0.1, 0.9, 0.9, 0.9], id="5 numbers"),
+    pytest.param([412.0, 188.5, 498.0, 402.0], id="pixels"),
+    pytest.param([0.1, 0.1, 1.1, 0.9], id="above 1"),
+    pytest.param([-0.1, 0.1, 0.9, 0.9], id="below 0"),
+    pytest.param([0.9, 0.1, 0.1, 0.9], id="x reversed"),
+    pytest.param([0.1, 0.9, 0.9, 0.1], id="y reversed"),
+    pytest.param([0.5, 0.1, 0.5, 0.9], id="no width"),
+    pytest.param([0.1, 0.5, 0.9, 0.5], id="no height"),
+    pytest.param([0.1, 0.1, math.nan, 0.9], id="NaN"),
+    pytest.param([0.1, 0.1, math.inf, 0.9], id="Infinity"),
+    pytest.param(["0.1", 0.1, 0.9, 0.9], id="number as string"),
+]
+
+
+@pytest.mark.parametrize("bbox", INVALID_BOXES)
+def test_invalid_participant_bbox_is_rejected(bbox: list[Any]) -> None:
+    payload = srs_sample()
+    payload["participants"][0]["bbox"] = bbox
+    with pytest.raises(ValidationError) as error:
+        parse(payload)
+    assert error.value.errors()[0]["loc"][:3] == ("participants", 0, "bbox")
+
+
+@pytest.mark.parametrize("bbox", INVALID_BOXES)
+def test_invalid_event_bbox_is_rejected(bbox: list[Any]) -> None:
+    with pytest.raises(ValidationError) as error:
+        parse(detection("fire", bbox=bbox))
+    assert error.value.errors()[0]["loc"][0] == "bbox"
+
+
+def test_event_details_are_kept() -> None:
+    event = parse(
+        detection(
+            "zone_intrusion", zone_id="zone-1", zone_version=2**31 - 1, confidence=0.87
+        )
+    )
+    assert event.zone_version == 2**31 - 1
+    assert event.confidence == 0.87
+
+
+# Less than ML promises is tolerated where refusing would lose a real alarm.
+@pytest.mark.parametrize(
+    "payload",
+    [
+        pytest.param(detection("fire", participants=[]), id="fire without bbox"),
+        pytest.param(detection("fire", bbox=[0, 0, 1, 1]), id="fire with people"),
+        pytest.param(detection("fall", bbox=[0, 0, 1, 1]), id="bbox on a fall"),
+        pytest.param(srs_sample() | {"episode_id": None}, id="fight without episode"),
+        pytest.param(
+            detection("zone_intrusion", zone_id="zone-1", zone_version=None),
+            id="zone without version",
+        ),
+        pytest.param(detection("fall", confidence=None), id="null confidence"),
+    ],
+)
+def test_incomplete_event_is_accepted(payload: dict[str, Any]) -> None:
+    assert parse(payload)
 
 
 @pytest.mark.parametrize(
@@ -129,6 +192,13 @@ def test_whole_numbers_are_accepted_in_bbox() -> None:
         pytest.param("camera_id", "", id="empty camera_id"),
         pytest.param("schema_version", 1.0, id="schema_version not a string"),
         pytest.param("participants", "17,23", id="participants not a list"),
+        pytest.param("run_id", "", id="empty run_id"),
+        pytest.param("run_id", "r" * 129, id="run_id too long"),
+        pytest.param("run_id", 7, id="run_id as number"),
+        pytest.param("zone_version", 2**31, id="zone_version too large"),
+        pytest.param("zone_version", -1, id="negative zone_version"),
+        pytest.param("zone_version", "1", id="zone_version as string"),
+        pytest.param("confidence", 1.5, id="event confidence > 1"),
     ],
 )
 def test_invalid_event_field_is_rejected(field: str, value: object) -> None:
@@ -139,7 +209,7 @@ def test_invalid_event_field_is_rejected(field: str, value: object) -> None:
 
 
 @pytest.mark.parametrize(
-    "required", ["schema_version", "event_id", "event_type", "camera_id"]
+    "required", ["schema_version", "event_id", "event_type", "camera_id", "run_id"]
 )
 def test_missing_required_field_is_rejected(required: str) -> None:
     payload = srs_sample()
@@ -153,10 +223,13 @@ def test_missing_required_field_is_rejected(required: str) -> None:
     [
         pytest.param("confidence", 1.5, id="confidence > 1"),
         pytest.param("confidence", "0.9", id="confidence as string"),
-        pytest.param("bbox", [1.0, 2.0, 3.0], id="bbox with 3 numbers"),
-        pytest.param("bbox", [1.0, 2.0, 3.0, 4.0, 5.0], id="bbox with 5 numbers"),
-        pytest.param("track_id", "", id="empty track_id"),
-        pytest.param("track_id", 17, id="track_id as number"),
+        pytest.param("confidence", math.nan, id="confidence NaN"),
+        pytest.param("track_id", "17", id="track_id as string"),
+        pytest.param("track_id", True, id="track_id as bool"),
+        pytest.param("track_id", 1.0, id="track_id as float"),
+        pytest.param("track_id", -1, id="negative track_id"),
+        pytest.param("track_id", 2**63, id="track_id too large"),
+        pytest.param("track_id", None, id="null track_id"),
     ],
 )
 def test_invalid_participant_field_is_rejected(field: str, value: object) -> None:
@@ -175,7 +248,7 @@ def test_event_is_immutable() -> None:
 
 
 def test_limits_are_required() -> None:
-    # Without them V9 and V15 would be skipped silently, so it is an error.
+    # Without them V9 would be skipped silently, so it is an error.
     with pytest.raises(TypeError, match="EventLimits"):
         MlEvent.model_validate_json(json.dumps(srs_sample()))
 
@@ -260,7 +333,7 @@ def test_zone_intrusion_with_zone_id_is_accepted() -> None:
 # V12
 def test_track_ids_are_unique_within_an_event() -> None:
     payload = srs_sample()
-    payload["participants"][1]["track_id"] = "17"
+    payload["participants"][1]["track_id"] = 17
     assert failure_code(payload) == FailureCode.INVALID_PARTICIPANTS
 
 
@@ -284,31 +357,39 @@ def test_suspicion_may_have_no_participants() -> None:
     assert parse(payload).participants == []
 
 
-# V14 and V15
-def test_embedding_on_confirmation_is_accepted() -> None:
-    event = parse(with_embedding(srs_sample()))
-    assert event.participants[0].embedding == [0.1] * DIM
+# V14
+STAGES = [("suspicion", "fight"), ("confirmation", "fight"), ("detection", "fall")]
 
 
-def test_embedding_on_suspicion_is_rejected() -> None:
-    payload = with_embedding(srs_sample() | {"event_type": "suspicion"})
+@pytest.mark.parametrize(("event_type", "incident_type"), STAGES)
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        pytest.param("embedding", [0.1] * 512, id="embedding"),
+        pytest.param("embedding_model_version", "insightface-1.0", id="model version"),
+        pytest.param("snapshot_ref", "snapshots/17.jpg", id="snapshot"),
+        # Malformed face data is reported as face data too.
+        pytest.param("embedding", "abc", id="embedding as string"),
+        pytest.param("embedding", [], id="empty embedding"),
+        pytest.param("embedding", [0.1, None, math.nan], id="odd embedding"),
+        pytest.param("embedding", "a\x00", id="embedding with U+0000"),
+        pytest.param("snapshot_ref", "", id="empty snapshot"),
+        pytest.param("snapshot_ref", False, id="snapshot as bool"),
+    ],
+)
+def test_face_data_is_rejected_in_any_event(
+    event_type: str, incident_type: str, field: str, value: object
+) -> None:
+    payload = srs_sample() | {"event_type": event_type, "incident_type": incident_type}
+    payload["participants"][1][field] = value
     assert failure_code(payload) == FailureCode.BIOMETRIC_NOT_ALLOWED
 
 
-def test_embedding_needs_its_model_version() -> None:
-    payload = with_embedding(srs_sample(), embedding_model_version=None)
-    assert failure_code(payload) == FailureCode.MISSING_FIELD
-
-
-@pytest.mark.parametrize("length", [DIM - 1, DIM + 1, 0])
-def test_embedding_must_have_dim_numbers(length: int) -> None:
-    payload = with_embedding(srs_sample(), embedding=[0.1] * length)
-    assert failure_code(payload) == FailureCode.INVALID_EMBEDDING
-
-
-@pytest.mark.parametrize("value", [math.nan, math.inf])
-def test_non_finite_numbers_are_rejected(value: float) -> None:
-    # json.dumps writes NaN / Infinity, which Python's json would read back.
-    payload = with_embedding(srs_sample(), embedding=[0.1, 0.2, 0.3, value])
-    with pytest.raises(ValidationError, match="finite"):
-        parse(payload)
+def test_null_face_fields_are_accepted() -> None:
+    payload = srs_sample()
+    payload["participants"][0] |= {
+        "embedding": None,
+        "embedding_model_version": None,
+        "snapshot_ref": None,
+    }
+    assert parse(payload)

@@ -19,7 +19,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.db.models import AuditEntry, Camera, DeadLetter, ProcessedEvent, Zone
 from app.domain.audit import AuditObjectType, AuditResult
 from app.domain.event import FailureCode
-from app.mqtt.events import EventLimits, MlEvent, Rejection, parse_event
+from app.mqtt.events import (
+    FACE_FIELDS,
+    EventLimits,
+    MlEvent,
+    Rejection,
+    parse_event,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -63,7 +69,7 @@ async def ingest_event(
             payload_hash=payload_hash,
         )
 
-    # V1..V7, V9, V11 (first half), V12..V15.
+    # V1..V7, V9, V11 (first half), V12..V14.
     parsed = parse_event(raw, limits)
     if isinstance(parsed, Rejection):
         return await reject(parsed)
@@ -85,7 +91,7 @@ async def ingest_event(
         )
 
     # V8. Known deviation from the V order: parse_event has already applied
-    # V9 and V11..V15, so an unknown camera next to such a fault is reported
+    # V9 and V11..V14, so an unknown camera next to such a fault is reported
     # as that fault. Handling (§7.5) is the same, only the code differs.
     camera = await session.scalar(select(Camera).where(Camera.code == event.camera_id))
     if camera is None or not camera.enabled:
@@ -162,9 +168,9 @@ async def _reject(
     )
     # §7.5: a privacy violation record in the Audit Log. Decided from the
     # message itself, not from the reported code: with another fault in the
-    # message the code is that fault (V order, or Pydantic skipping the
-    # cross-field rules), but biometric data was still sent.
-    if loaded is not None and _has_embedding_on_suspicion(loaded):
+    # message the code may be that fault (V order), but face data was still
+    # sent.
+    if loaded is not None and _has_face_data(loaded):
         session.add(_privacy_violation(loaded, topic))
     await session.flush()
     # detail never contains input values (see Rejection), so it may be logged.
@@ -178,16 +184,13 @@ async def _reject(
     return IngestOutcome(IngestStatus.REJECTED, code=rejection.code)
 
 
-def _has_embedding_on_suspicion(loaded: dict[str, Any]) -> bool:
-    # The same condition as V14 in MlEvent, read from the unvalidated JSON.
+def _has_face_data(loaded: dict[str, Any]) -> bool:
+    # The same condition as V14 in Participant, read from the unvalidated JSON.
     participants = loaded.get("participants")
-    return (
-        loaded.get("event_type") == "suspicion"
-        and isinstance(participants, list)
-        and any(
-            isinstance(participant, dict) and participant.get("embedding") is not None
-            for participant in participants
-        )
+    return isinstance(participants, list) and any(
+        isinstance(participant, dict)
+        and any(participant.get(field) is not None for field in FACE_FIELDS)
+        for participant in participants
     )
 
 

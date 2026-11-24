@@ -35,6 +35,14 @@ _SEVERITY_PAIRS = ", ".join(
     for incident_type, severity in SEVERITY_BY_TYPE.items()
 )
 
+# [x1, y1, x2, y2] as fractions of the frame; arrays are 1-indexed. array_position
+# is needed: "0 <= ALL" with a NULL element is NULL, and a NULL CHECK passes.
+_BBOX_NORMALIZED = (
+    "bbox IS NULL OR (array_position(bbox, NULL) IS NULL "
+    "AND 0 <= ALL (bbox) AND 1 >= ALL (bbox) "
+    "AND bbox[1] < bbox[3] AND bbox[2] < bbox[4])"
+)
+
 # Built from the enum, so the partial indexes cannot silently match nothing.
 _TIMER_PENDING = f"state = '{TimerState.PENDING.value}'"
 
@@ -62,6 +70,11 @@ class Incident(EntityMixin, Base):
             "OR zone_id IS NOT NULL",
             name="zone_intrusion_requires_zone",
         ),
+        CheckConstraint("cardinality(bbox) = 4", name="bbox_has_4_values"),
+        CheckConstraint(_BBOX_NORMALIZED, name="bbox_normalized"),
+        CheckConstraint(
+            "confidence >= 0 AND confidence <= 1", name="confidence_in_range"
+        ),
     )
 
     incident_type: Mapped[IncidentType]
@@ -71,6 +84,15 @@ class Incident(EntityMixin, Base):
     zone_id: Mapped[uuid.UUID | None] = mapped_column(
         ForeignKey("zones.id"), index=True
     )
+    # Version of the zone ML used; the zone may have been edited since.
+    zone_version: Mapped[int | None]
+    # Detection pipeline version. On the incident too, because a fire has no
+    # participants.
+    model_version: Mapped[str]
+    # Confidence of the whole event; not an identity score.
+    confidence: Mapped[float | None]
+    # Where the fire is; other types have boxes on their participants.
+    bbox: Mapped[list[float] | None] = mapped_column(ARRAY(Float))
     measures: Mapped[str | None]
     clip_state: Mapped[ClipState] = mapped_column(
         server_default=ClipState.PENDING.value
@@ -95,23 +117,27 @@ class Participant(EntityMixin, Base):
 
     __tablename__ = "participants"
     __table_args__ = (
-        # One row per tracked person per incident. Also serves as the index
-        # for incident_id, since it is the first column.
-        UniqueConstraint("incident_id", "track_id"),
+        # One row per tracked person per incident; track ids start again in
+        # each run of ML. Also serves as the index for incident_id, since it
+        # is the first column.
+        UniqueConstraint("incident_id", "run_id", "track_id"),
         CheckConstraint(
             "confidence >= 0 AND confidence <= 1", name="confidence_in_range"
         ),
         CheckConstraint("cardinality(bbox) = 4", name="bbox_has_4_values"),
+        CheckConstraint(_BBOX_NORMALIZED, name="bbox_normalized"),
     )
 
     # A participant means nothing without its incident.
     incident_id: Mapped[uuid.UUID] = mapped_column(
         ForeignKey("incidents.id", ondelete="CASCADE")
     )
-    # Tracker id from ML, unique only within one incident.
+    # The run of the ML process that gave the track id.
+    run_id: Mapped[str]
+    # Tracker id from ML (a number, kept as text), unique only within one run.
     track_id: Mapped[str]
     confidence: Mapped[float]
-    # [x1, y1, x2, y2] in image pixels, floats; optional (SRS §7.3).
+    # [x1, y1, x2, y2] as fractions of the frame (0..1); optional (SRS §7.3).
     bbox: Mapped[list[float] | None] = mapped_column(ARRAY(Float))
     # Link to the stored snapshot, not the image itself.
     snapshot_ref: Mapped[str | None]

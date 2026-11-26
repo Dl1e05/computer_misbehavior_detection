@@ -1,0 +1,91 @@
+{
+ "created": "2026-11-25 02:38",
+ "videos": 800,
+ "wall_s": 314.8,
+ "config": {
+  "task": "fight",
+  "split": "dev",
+  "fps": 8.0,
+  "hold_s": 0.0,
+  "before_s": 1.0,
+  "after_s": 2.0,
+  "rule_params": {
+   "fall": {
+    "fall_window_s": 1.5,
+    "drop_ratio": 0.3,
+    "torso_angle_deg": 60,
+    "aspect_ratio": 1.0,
+    "still_s": 2,
+    "still_motion": 0.05,
+    "get_up_s": 0.5,
+    "kpt_conf": 0.5
+   }
+  },
+  "label": "negative",
+  "limit_note": "все",
+  "model_version": "ml-0.1.0/yolo26n-det-1.0.0/bytetrack-1.0/yolo26n-pose-1.0.0/fall-rule-0.1.0"
+ },
+ "levels": {
+  "detection": {
+   "overall": {
+    "videos": 800,
+    "videos_positive": 0,
+    "intervals": 0,
+    "tp": 0,
+    "fn": 0,
+    "fp": 1,
+    "duplicates": 0,
+    "precision": 0.0,
+    "recall": null,
+    "f1": 0.0,
+    "calm_hours": 1.111,
+    "fp_per_hour": 0.9,
+    "delay_p50_s": null,
+    "delay_p95_s": null,
+    "clips": {
+     "pos_pred": 0,
+     "pos_miss": 0,
+     "neg_pred": 1,
+     "neg_clean": 799
+    }
+   },
+   "by_tag": {
+    "cctv": {
+     "videos": 800,
+     "videos_positive": 0,
+     "intervals": 0,
+     "tp": 0,
+     "fn": 0,
+     "fp": 1,
+     "duplicates": 0,
+     "precision": 0.0,
+     "recall": null,
+     "f1": 0.0,
+     "calm_hours": 1.111,
+     "fp_per_hour": 0.9,
+     "delay_p50_s": null,
+     "delay_p95_s": null,
+     "clips": {
+      "pos_pred": 0,
+      "pos_miss": 0,
+      "neg_pred": 1,
+      "neg_clean": 799
+     }
+    }
+   },
+   "errors": {
+    "missed": [],
+    "false": [
+     {
+      "video_id": "rwf-a4de65319e",
+      "file": "data/raw/rwf2000/RWF-2000/RWF-2000/train/Train_NonFight/sHa6YZW9_0.avi",
+      "tags": "cctv",
+      "times_s": [
+       3.633
+      ]
+     }
+    ]
+   }
+  }
+ }
+}

@@ -11,10 +11,14 @@
 
 Горизонтальная поза: торс (середина плеч -> середина бёдер) отклонён от вертикали
 > torso_angle_deg, либо ширина рамки / высота > aspect_ratio.
-Учитываются только точки с conf > kpt_conf. Не видно плеч или бёдер — переход в
-FALLING не засчитывается (по ТЗ 5.2 лучше пропустить, чем выдумать падение).
-Но в кадрах, где скелет пропал (смаз в момент падения — частый случай), высоту
-бёдер для ИСТОРИИ оцениваем по центру рамки — иначе «до падения» не с чем сравнить.
+Учитываются только точки с conf > kpt_conf. В кадрах, где скелет пропал (смаз в момент
+падения — частый случай: на UR Fall это главная причина пропусков, шаг 10), высоту бёдер
+оцениваем по центру рамки. bbox_fallback (настройка 25.11): если скелет человека УВЕРЕННО видели,
+пока он стоял, не раньше pose_memory_s назад, а в момент падения скелет пропал (смаз), переход в
+FALLING разрешён и по рамке — центр рамки опустился > drop_ratio роста И рамка стала шире высоты;
+такое событие получает пониженную уверенность (× fallback_conf). Торс закрыт всё время или скелета
+не было вообще — события нет (ТЗ 5.2: низкая уверенность, а не выдуманное падение). Неподвижность без скелета — по смещению
+центра рамки (в долях её размера).
 
 Все числа — стартовые для настройки (в cameras.yaml), не доказанные значения.
 """
@@ -49,6 +53,8 @@ class _State:
     still_since: datetime | None = None
     upright_since: datetime | None = None             # для get_up_s в ON_GROUND
     prev_kpts: np.ndarray | None = None
+    prev_center: tuple[float, float] | None = None
+    upright_pose_at: datetime | None = None           # когда последний раз видели скелет стоящего
     alerted: bool = False
     torso_conf: float = 0.0
     last_seen: datetime | None = None
@@ -79,6 +85,9 @@ class FallRule(Rule):
         self.still_motion = float(p.get("still_motion", 0.05))   # доля размера человека за кадр
         self.get_up_s = float(p.get("get_up_s", 0.5))
         self.kpt_conf = float(p.get("kpt_conf", 0.5))
+        self.bbox_fallback = bool(p.get("bbox_fallback", True))
+        self.fallback_conf = float(p.get("fallback_conf", 0.7))
+        self.pose_memory_s = float(p.get("pose_memory_s", 2.0))
         self.forget_s = float(p.get("forget_s", 10.0))
         self._state: dict[int, _State] = {}
 
@@ -132,10 +141,17 @@ class FallRule(Rule):
             while st.history and (now - st.history[0].ts).total_seconds() > self.fall_window_s:
                 st.history.popleft()
 
+            if hip_y is not None and not horizontal:
+                st.upright_pose_at = now                           # стоит, скелет уверенный
             if st.phase == UPRIGHT:
                 if horizontal and hip_y is not None and self._dropped(st, hip_y):
                     self._go(st, FALLING, now)
                     st.torso_conf = torso_conf
+                elif (self.bbox_fallback and hip_y is None and horizontal and st.upright_pose_at is not None
+                      and (now - st.upright_pose_at).total_seconds() <= self.pose_memory_s
+                      and self._dropped(st, hist_hip)):               # скелет пропал при падении — по рамке
+                    self._go(st, FALLING, now)
+                    st.torso_conf = t.conf * self.fallback_conf
             elif st.phase == FALLING:
                 if horizontal:
                     self._go(st, ON_GROUND, now)
@@ -152,6 +168,10 @@ class FallRule(Rule):
                 else:
                     st.upright_since = None
                     m = self._motion(st.prev_kpts, kpts, t.bbox)
+                    if m is None and st.prev_center is not None:   # скелета нет — по центру рамки
+                        size = max(t.bbox[2] - t.bbox[0], t.bbox[3] - t.bbox[1], 1e-6)
+                        cx, cy = (t.bbox[0] + t.bbox[2]) / 2, (t.bbox[1] + t.bbox[3]) / 2
+                        m = float(np.hypot(cx - st.prev_center[0], cy - st.prev_center[1]) / size)
                     if m is not None and m > self.still_motion:
                         st.still_since = now                       # шевелится — ждём заново
                     if (not st.alerted and st.still_since is not None
@@ -164,6 +184,7 @@ class FallRule(Rule):
                             participants=[Participant(t.track_id, ctx.norm_bbox(t.bbox), round(t.conf, 3))],
                         ))
             st.prev_kpts = kpts
+            st.prev_center = ((t.bbox[0] + t.bbox[2]) / 2, (t.bbox[1] + t.bbox[3]) / 2)
         self._forget(now)
         return out
 

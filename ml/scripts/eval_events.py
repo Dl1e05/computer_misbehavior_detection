@@ -218,7 +218,8 @@ def main() -> None:
                    "limit_note": f"по {args.limit} каждого класса" if args.limit else "все",
                    "model_version": "; ".join(ModelVersions(app.get("versions", {})).for_incident(
                        n, set(RULES[n].requires)) for n in names)},
-        "levels": {k: v for n in names for k, v in evaluate(rows, ivs, events, n, args, len(names) > 1).items()},
+        "levels": {k: v for n in names
+                   for k, v in evaluate(rows, ivs, events, n, args, len(names) > 1 or n != args.task).items()},
     }
     out_dir = ROOT / "reports" / "eval"
     out_dir.mkdir(parents=True, exist_ok=True)

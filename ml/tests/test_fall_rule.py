@@ -2,6 +2,7 @@
 from datetime import datetime, timedelta, timezone
 
 import numpy as np
+import pytest
 
 from vision.analytics.tracker import Track
 from vision.inference.pose import Pose, attach_poses
@@ -176,3 +177,25 @@ def test_pose_lost_during_fall_still_detected():
             k[:, 2] = 0.0
         frames.append((bbox, k))
     assert len(run(frames)[0]) == 1
+
+
+def test_pose_lost_during_fall_uses_bbox_with_lower_confidence():
+    """Скелет уверенно видели стоя, в момент падения он пропал (смаз) — падение по рамке, уверенность ниже."""
+    r = RULES["fall"]("cam-01", {})
+    frames = seq((S, 1), (lambda s: lerp(S, L, s), 0.5), (L, 5))
+    ev = []
+    for i, (bbox, k) in enumerate(frames):
+        poses = {1: k} if i < FPS else {}                     # стоя — скелет есть, дальше пропал
+        ev += r.update(RuleContext("cam-01", T0 + timedelta(seconds=i / FPS), 1920, 1080,
+                                   [Track(1, bbox, 0.9, 0)], poses=poses))
+    assert len(ev) == 1 and ev[0].confidence == pytest.approx(0.63)
+
+
+def test_bbox_fallback_can_be_switched_off():
+    r = RULES["fall"]("cam-01", {"bbox_fallback": False})
+    frames = seq((S, 1), (lambda s: lerp(S, L, s), 0.5), (L, 5))
+    ev = []
+    for i, (bbox, k) in enumerate(frames):
+        ev += r.update(RuleContext("cam-01", T0 + timedelta(seconds=i / FPS), 1920, 1080,
+                                   [Track(1, bbox, 0.9, 0)], poses={1: k} if i < FPS else {}))
+    assert ev == []

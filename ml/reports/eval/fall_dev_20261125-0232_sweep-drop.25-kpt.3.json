@@ -1,0 +1,263 @@
+{
+ "created": "2026-11-25 02:32",
+ "videos": 57,
+ "wall_s": 47.4,
+ "config": {
+  "task": "fall",
+  "split": "dev",
+  "fps": 8.0,
+  "hold_s": 5.0,
+  "before_s": 1.0,
+  "after_s": 2.0,
+  "rule_params": {
+   "fall": {
+    "fall_window_s": 1.5,
+    "drop_ratio": 0.25,
+    "torso_angle_deg": 60,
+    "aspect_ratio": 1.0,
+    "still_s": 2,
+    "still_motion": 0.05,
+    "get_up_s": 0.5,
+    "kpt_conf": 0.3
+   }
+  },
+  "label": "all",
+  "limit_note": "все",
+  "model_version": "ml-0.1.0/yolo26n-det-1.0.0/bytetrack-1.0/yolo26n-pose-1.0.0/fall-rule-0.1.0"
+ },
+ "levels": {
+  "detection": {
+   "overall": {
+    "videos": 57,
+    "videos_positive": 30,
+    "intervals": 30,
+    "tp": 9,
+    "fn": 21,
+    "fp": 1,
+    "duplicates": 0,
+    "precision": 0.9,
+    "recall": 0.3,
+    "f1": 0.45,
+    "calm_hours": 0.108,
+    "fp_per_hour": 9.29,
+    "delay_p50_s": 4.075,
+    "delay_p95_s": 4.41,
+    "clips": {
+     "pos_pred": 9,
+     "pos_miss": 21,
+     "neg_pred": 1,
+     "neg_clean": 26
+    }
+   },
+   "by_tag": {
+    "adl": {
+     "videos": 27,
+     "videos_positive": 0,
+     "intervals": 0,
+     "tp": 0,
+     "fn": 0,
+     "fp": 1,
+     "duplicates": 0,
+     "precision": 0.0,
+     "recall": null,
+     "f1": 0.0,
+     "calm_hours": 0.094,
+     "fp_per_hour": 10.67,
+     "delay_p50_s": null,
+     "delay_p95_s": null,
+     "clips": {
+      "pos_pred": 0,
+      "pos_miss": 0,
+      "neg_pred": 1,
+      "neg_clean": 26
+     }
+    },
+    "adl_lying": {
+     "videos": 12,
+     "videos_positive": 0,
+     "intervals": 0,
+     "tp": 0,
+     "fn": 0,
+     "fp": 1,
+     "duplicates": 0,
+     "precision": 0.0,
+     "recall": null,
+     "f1": 0.0,
+     "calm_hours": 0.05,
+     "fp_per_hour": 20.05,
+     "delay_p50_s": null,
+     "delay_p95_s": null,
+     "clips": {
+      "pos_pred": 0,
+      "pos_miss": 0,
+      "neg_pred": 1,
+      "neg_clean": 11
+     }
+    },
+    "overhead": {
+     "videos": 15,
+     "videos_positive": 15,
+     "intervals": 15,
+     "tp": 0,
+     "fn": 15,
+     "fp": 0,
+     "duplicates": 0,
+     "precision": null,
+     "recall": 0.0,
+     "f1": 0.0,
+     "calm_hours": 0.007,
+     "fp_per_hour": 0.0,
+     "delay_p50_s": null,
+     "delay_p95_s": null,
+     "clips": {
+      "pos_pred": 0,
+      "pos_miss": 15,
+      "neg_pred": 0,
+      "neg_clean": 0
+     }
+    },
+    "side": {
+     "videos": 42,
+     "videos_positive": 15,
+     "intervals": 15,
+     "tp": 9,
+     "fn": 6,
+     "fp": 1,
+     "duplicates": 0,
+     "precision": 0.9,
+     "recall": 0.6,
+     "f1": 0.72,
+     "calm_hours": 0.101,
+     "fp_per_hour": 9.93,
+     "delay_p50_s": 4.075,
+     "delay_p95_s": 4.41,
+     "clips": {
+      "pos_pred": 9,
+      "pos_miss": 6,
+      "neg_pred": 1,
+      "neg_clean": 26
+     }
+    }
+   },
+   "errors": {
+    "missed": [
+     {
+      "video_id": "fall-01-cam1",
+      "file": "data/raw/urfall/fall-01-cam1.mp4",
+      "tags": "overhead"
+     },
+     {
+      "video_id": "fall-02-cam1",
+      "file": "data/raw/urfall/fall-02-cam1.mp4",
+      "tags": "overhead"
+     },
+     {
+      "video_id": "fall-03-cam1",
+      "file": "data/raw/urfall/fall-03-cam1.mp4",
+      "tags": "overhead"
+     },
+     {
+      "video_id": "fall-05-cam0",
+      "file": "data/raw/urfall/fall-05-cam0.mp4",
+      "tags": "side"
+     },
+     {
+      "video_id": "fall-05-cam1",
+      "file": "data/raw/urfall/fall-05-cam1.mp4",
+      "tags": "overhead"
+     },
+     {
+      "video_id": "fall-07-cam1",
+      "file": "data/raw/urfall/fall-07-cam1.mp4",
+      "tags": "overhead"
+     },
+     {
+      "video_id": "fall-09-cam1",
+      "file": "data/raw/urfall/fall-09-cam1.mp4",
+      "tags": "overhead"
+     },
+     {
+      "video_id": "fall-14-cam1",
+      "file": "data/raw/urfall/fall-14-cam1.mp4",
+      "tags": "overhead"
+     },
+     {
+      "video_id": "fall-15-cam1",
+      "file": "data/raw/urfall/fall-15-cam1.mp4",
+      "tags": "overhead"
+     },
+     {
+      "video_id": "fall-16-cam1",
+      "file": "data/raw/urfall/fall-16-cam1.mp4",
+      "tags": "overhead"
+     },
+     {
+      "video_id": "fall-19-cam0",
+      "file": "data/raw/urfall/fall-19-cam0.mp4",
+      "tags": "side"
+     },
+     {
+      "video_id": "fall-19-cam1",
+      "file": "data/raw/urfall/fall-19-cam1.mp4",
+      "tags": "overhead"
+     },
+     {
+      "video_id": "fall-21-cam0",
+      "file": "data/raw/urfall/fall-21-cam0.mp4",
+      "tags": "side"
+     },
+     {
+      "video_id": "fall-21-cam1",
+      "file": "data/raw/urfall/fall-21-cam1.mp4",
+      "tags": "overhead"
+     },
+     {
+      "video_id": "fall-24-cam1",
+      "file": "data/raw/urfall/fall-24-cam1.mp4",
+      "tags": "overhead"
+     },
+     {
+      "video_id": "fall-26-cam0",
+      "file": "data/raw/urfall/fall-26-cam0.mp4",
+      "tags": "side"
+     },
+     {
+      "video_id": "fall-26-cam1",
+      "file": "data/raw/urfall/fall-26-cam1.mp4",
+      "tags": "overhead"
+     },
+     {
+      "video_id": "fall-27-cam0",
+      "file": "data/raw/urfall/fall-27-cam0.mp4",
+      "tags": "side"
+     },
+     {
+      "video_id": "fall-27-cam1",
+      "file": "data/raw/urfall/fall-27-cam1.mp4",
+      "tags": "overhead"
+     },
+     {
+      "video_id": "fall-28-cam0",
+      "file": "data/raw/urfall/fall-28-cam0.mp4",
+      "tags": "side"
+     },
+     {
+      "video_id": "fall-28-cam1",
+      "file": "data/raw/urfall/fall-28-cam1.mp4",
+      "tags": "overhead"
+     }
+    ],
+    "false": [
+     {
+      "video_id": "adl-39-cam0",
+      "file": "data/raw/urfall/adl-39-cam0.mp4",
+      "tags": "side;adl;adl_lying",
+      "times_s": [
+       11.0
+      ]
+     }
+    ]
+   }
+  }
+ }
+}

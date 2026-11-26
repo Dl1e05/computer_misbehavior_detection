@@ -1,0 +1,764 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#090b10">
+  <meta name="description" content="Демонстрационный сценарий Crimetor: от кадра камеры до уведомления об инциденте.">
+  <title>Crimetor - сценарий фиксации инцидента</title>
+  <link rel="preconnect" href="https://cdnjs.cloudflare.com" crossorigin>
+  <script defer src="https://cdnjs.cloudflare.com/ajax/libs/gsap/3.12.5/gsap.min.js"></script>
+  <script defer src="https://cdnjs.cloudflare.com/ajax/libs/gsap/3.12.5/ScrollTrigger.min.js"></script>
+  <script defer src="./scene3d.js"></script>
+  <style>
+    :root {
+      color-scheme: dark;
+      --bg: #090b10;
+      --panel: #11151c;
+      --paper: #f0eee9;
+      --muted: #a3a8af;
+      --line: rgba(239, 238, 232, .15);
+      --red: #ef5148;
+      --serif: Georgia, "Times New Roman", serif;
+      --sans: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+
+    * { box-sizing: border-box; }
+    html { scroll-behavior: smooth; background: var(--bg); }
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--paper);
+      font-family: var(--sans);
+      -webkit-font-smoothing: antialiased;
+    }
+    button { font: inherit; }
+    a { color: inherit; }
+    button:focus-visible, a:focus-visible { outline: 2px solid var(--red); outline-offset: 4px; }
+
+    .site-header {
+      position: fixed;
+      z-index: 20;
+      inset: 0 0 auto;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      min-height: 78px;
+      padding: 16px clamp(20px, 5vw, 76px);
+      border-bottom: 1px solid var(--line);
+      background: rgba(9, 11, 16, .84);
+      backdrop-filter: blur(16px);
+    }
+    .brand {
+      display: inline-flex;
+      align-items: center;
+      gap: 11px;
+      text-decoration: none;
+      font-size: 14px;
+      font-weight: 750;
+      letter-spacing: .17em;
+    }
+    .brand-mark {
+      display: grid;
+      width: 29px;
+      height: 29px;
+      place-items: center;
+      border: 1px solid rgba(239, 81, 72, .7);
+      color: var(--red);
+      font-size: 13px;
+      line-height: 1;
+    }
+    .brand-note {
+      margin-left: 8px;
+      color: #8c929a;
+      font-size: 9px;
+      font-weight: 550;
+      letter-spacing: .15em;
+    }
+    .chapter-nav { display: flex; align-items: center; gap: clamp(10px, 2vw, 27px); }
+    .chapter-nav button {
+      padding: 8px 0;
+      border: 0;
+      background: transparent;
+      color: #b7bbc1;
+      cursor: pointer;
+      font-size: 11px;
+      letter-spacing: .035em;
+      transition: color .2s ease;
+    }
+    .chapter-nav button:hover { color: var(--paper); }
+
+    .story-track { position: relative; height: 460svh; min-height: 2600px; }
+    .scene-sticky { position: sticky; top: 0; height: 100svh; overflow: hidden; }
+    .scene-sticky::before, .scene-sticky::after {
+      position: absolute;
+      z-index: 2;
+      right: 0;
+      left: 0;
+      height: 150px;
+      content: "";
+      pointer-events: none;
+    }
+    .scene-sticky::before { top: 78px; background: linear-gradient(180deg, rgba(9, 11, 16, .48), transparent); }
+    .scene-sticky::after { bottom: 0; height: 46%; background: linear-gradient(0deg, rgba(9, 11, 16, .98) 2%, rgba(9, 11, 16, .79) 47%, transparent); }
+    .visual-stage {
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      width: min(100vw, 1600px, 177.78svh);
+      aspect-ratio: 16 / 9;
+      transform: translate(-50%, -54%);
+      overflow: hidden;
+      background: #0b1118;
+      box-shadow: 0 40px 100px rgba(0, 0, 0, .3);
+    }
+    .visual-stage::after {
+      position: absolute;
+      inset: 0;
+      border: 1px solid rgba(235, 239, 236, .12);
+      content: "";
+      pointer-events: none;
+    }
+    .classroom-art { display: block; width: 100%; height: 100%; }
+    .scene-3d { position: absolute; z-index: 1; inset: 0; width: 100%; height: 100%; opacity: 0; pointer-events: none; transition: opacity .5s ease; }
+    .scene-3d[data-ready="true"] { opacity: 1; }
+    .phone-overlay {
+      --phone-offset: 420px;
+      position: absolute;
+      z-index: 4;
+      top: 50%;
+      left: 62%;
+      width: min(330px, 23vw);
+      aspect-ratio: 328 / 570;
+      opacity: 0;
+      transform: translateY(calc(-50% + var(--phone-offset)));
+      pointer-events: none;
+    }
+    .phone-art { display: block; width: 100%; height: 100%; overflow: visible; filter: drop-shadow(0 20px 28px rgba(0, 0, 0, .55)); }
+    .scene-meta {
+      position: absolute;
+      z-index: 3;
+      top: 102px;
+      right: clamp(20px, 5vw, 76px);
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      color: #a6abb1;
+      font-size: 9px;
+      letter-spacing: .16em;
+      text-transform: uppercase;
+    }
+    .live-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--red); box-shadow: 0 0 14px rgba(239, 81, 72, .8); }
+    .scroll-cue {
+      position: absolute;
+      z-index: 4;
+      left: clamp(20px, 5vw, 76px);
+      bottom: 71px;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      color: #858b93;
+      font-size: 9px;
+      letter-spacing: .16em;
+      text-transform: uppercase;
+    }
+    .cue-line { width: 35px; height: 1px; background: var(--red); transform-origin: left; }
+    .chapter-panel {
+      position: absolute;
+      z-index: 5;
+      bottom: clamp(82px, 11vh, 126px);
+      left: clamp(20px, 8.2vw, 132px);
+      width: min(600px, 75vw);
+      min-height: 210px;
+    }
+    .chapter-card { display: none; max-width: 570px; animation: rise-in .55s both; }
+    .chapter-card.is-active { display: block; }
+    .chapter-kicker {
+      display: flex;
+      align-items: center;
+      gap: 13px;
+      margin: 0 0 16px;
+      color: #c8c5bd;
+      font-size: 9px;
+      letter-spacing: .18em;
+      text-transform: uppercase;
+    }
+    .chapter-kicker::before { width: 24px; height: 1px; background: var(--red); content: ""; }
+    .chapter-card h1, .chapter-card h2 {
+      max-width: 560px;
+      margin: 0;
+      font-family: var(--serif);
+      font-size: clamp(38px, 5.2vw, 76px);
+      font-weight: 400;
+      letter-spacing: -.045em;
+      line-height: .98;
+      text-wrap: balance;
+    }
+    .chapter-card p {
+      max-width: 440px;
+      margin: 20px 0 0;
+      color: #b5b8bd;
+      font-size: clamp(13px, 1.15vw, 16px);
+      line-height: 1.65;
+    }
+    .chapter-card .alert-copy {
+      display: inline-block;
+      margin-top: 16px;
+      padding: 12px 15px;
+      border-left: 2px solid var(--red);
+      background: rgba(239, 81, 72, .08);
+      color: #fff;
+      font-size: 15px;
+      line-height: 1.5;
+    }
+    .page-count {
+      position: absolute;
+      z-index: 4;
+      right: clamp(20px, 5vw, 76px);
+      bottom: 72px;
+      color: #969ba2;
+      font-size: 10px;
+      letter-spacing: .13em;
+    }
+    .page-count strong { color: var(--paper); font-weight: 500; }
+    .progress-track {
+      position: absolute;
+      z-index: 5;
+      right: 0;
+      bottom: 0;
+      left: 0;
+      height: 2px;
+      background: rgba(255, 255, 255, .12);
+    }
+    .progress-fill { width: 0%; height: 100%; background: var(--red); transform-origin: left; }
+
+    .closing-note { display: flex; align-items: center; gap: clamp(16px, 3vw, 40px); min-height: 112px; padding: 22px clamp(20px, 8.2vw, 132px); border-top: 1px solid var(--line); background: #0c0f14; }
+    .closing-note h2, .closing-note p { margin: 0; }
+    .closing-note p { max-width: 620px; line-height: 1.5; }
+    .pricing { padding: clamp(48px, 8vw, 100px) clamp(20px, 8.2vw, 132px); border-top: 1px solid var(--line); background: #0c0f14; font-size: 16px; line-height: 1.55; }
+    .pricing, .quote-form { scroll-margin-top: 94px; }
+    .pricing-heading { max-width: 720px; margin-bottom: 28px; }
+    .pricing h2 { margin: 0 0 12px; font: 400 clamp(34px, 5vw, 56px)/1.05 var(--serif); letter-spacing: -.04em; }
+    .pricing p { margin: 8px 0; color: #b5b8bd; }
+    .pricing .price-note { color: #e3ded5; }
+    .plan-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; }
+    .plan-card { display: flex; flex-direction: column; padding: 22px; border: 1px solid var(--line); background: #11151c; }
+    .plan-card h3 { margin: 0 0 10px; font-size: 17px; }
+    .plan-card .price { color: var(--paper); font-size: 25px; font-weight: 650; }
+    .plan-card ul { flex: 1; margin: 14px 0 20px; padding-left: 19px; color: #c3c6ca; font-size: 14px; }
+    .pricing button, .pricing input, .pricing select { min-height: 44px; border: 1px solid #454a52; border-radius: 0; background: #090b10; color: var(--paper); font: inherit; }
+    .pricing button { padding: 9px 14px; cursor: pointer; }
+    .pricing button:hover:not(:disabled) { border-color: var(--red); }
+    .pricing button:disabled { cursor: not-allowed; opacity: .55; }
+    .quote-form { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; margin-top: 28px; padding: 22px; border: 1px solid var(--line); }
+    .quote-heading { grid-column: 1 / -1; }
+    .quote-heading h3 { margin: 0; font-size: 20px; }
+    .quote-heading p { margin-bottom: 0; }
+    .quote-form label { display: grid; gap: 6px; color: #d2d0ca; font-size: 14px; }
+    .quote-form input, .quote-form select { width: 100%; padding: 8px 10px; }
+    .quote-total { align-self: end; color: var(--paper); font-weight: 650; }
+    .quote-form button { align-self: end; }
+    .chapter-nav a { color: #b7bbc1; font-size: 13px; text-decoration: none; }
+    .chapter-nav a:hover { color: var(--paper); }
+    .footer-line { display: flex; justify-content: space-between; padding: 18px clamp(20px, 5vw, 76px); color: #707780; font-size: 9px; letter-spacing: .1em; }
+
+    @keyframes rise-in { from { opacity: 0; transform: translateY(12px); } to { opacity: 1; transform: translateY(0); } }
+
+    @media (max-width: 720px) {
+      .site-header { min-height: 94px; align-items: flex-start; flex-wrap: wrap; gap: 5px 12px; padding: 12px 18px 9px; }
+      .brand { font-size: 12px; }
+      .brand-mark { width: 25px; height: 25px; }
+      .brand-note { display: none; }
+      .chapter-nav { width: 100%; justify-content: space-between; gap: 8px; }
+      .chapter-nav button, .chapter-nav a { padding: 4px 0; font-size: 11px; }
+      .plan-grid, .quote-form { grid-template-columns: 1fr; }
+      .pricing, .quote-form { scroll-margin-top: 110px; }
+      .scene-sticky { min-height: 0; }
+      .scene-sticky::before { top: 94px; }
+      .visual-stage { top: 43%; width: min(100vw, 177.78svh); transform: translate(-50%, -50%); }
+      .phone-overlay { top: 47%; left: 50%; width: min(212px, 57vw); transform: translate(-50%, calc(-50% + var(--phone-offset))); }
+      .scene-meta { top: 119px; right: 18px; font-size: 8px; }
+      .chapter-panel { bottom: 80px; left: 20px; width: calc(100% - 40px); min-height: 180px; }
+      .chapter-card h1, .chapter-card h2 { max-width: 450px; font-size: clamp(38px, 10vw, 54px); }
+      .chapter-card p { max-width: 400px; margin-top: 13px; font-size: 13px; }
+      .chapter-card .alert-copy { max-width: 95%; margin-top: 10px; padding: 9px 11px; font-size: 13px; }
+      .scroll-cue { right: auto; bottom: 30px; left: 20px; font-size: 8px; }
+      .page-count { right: 20px; bottom: 29px; }
+      .closing-note { min-height: 92px; align-items: flex-start; flex-direction: column; padding-top: 17px; padding-bottom: 17px; }
+      .footer-line { gap: 14px; font-size: 8px; }
+    }
+
+    @media (max-height: 700px) and (min-width: 721px) {
+      .chapter-panel { bottom: 67px; min-height: 170px; }
+      .chapter-card h1, .chapter-card h2 { font-size: clamp(36px, 4.8vw, 62px); }
+      .chapter-card p { margin-top: 12px; }
+      .scene-meta { top: 91px; }
+    }
+
+    @media (max-width: 720px) and (max-height: 700px) {
+      .phone-overlay { top: 40%; width: min(165px, 46vw); }
+      .chapter-panel { bottom: 54px; min-height: 130px; }
+      .chapter-card h1, .chapter-card h2 { font-size: clamp(34px, 9vw, 47px); }
+      .chapter-card p { margin-top: 9px; }
+      .scroll-cue, .page-count { bottom: 19px; }
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      *, *::before, *::after { scroll-behavior: auto !important; animation-duration: .01ms !important; animation-iteration-count: 1 !important; transition-duration: .01ms !important; }
+      .story-track { height: auto; min-height: 0; }
+      .scene-sticky { position: relative; top: auto; height: auto; min-height: 0; overflow: visible; padding: 110px 0 35px; }
+      .scene-sticky::before, .scene-sticky::after, .scroll-cue, .page-count, .progress-track { display: none; }
+      .visual-stage { position: relative; top: auto; left: auto; width: min(100vw, 177.78svh); margin: 0 auto; transform: none; }
+      .phone-overlay { position: relative; top: auto; left: auto; width: min(230px, 55vw); margin: 28px auto 0; opacity: 1; transform: none; }
+      .scene-meta { top: 82px; }
+      .chapter-panel { position: relative; bottom: auto; left: auto; width: min(760px, calc(100% - 40px)); min-height: 0; margin: 26px auto 0; }
+      .chapter-card, .chapter-card.is-active { display: block; max-width: 720px; margin: 0 0 36px; animation: none; }
+      .chapter-card h1, .chapter-card h2 { font-size: clamp(35px, 6vw, 60px); }
+      .closing-note { min-height: 92px; }
+    }
+  </style>
+</head>
+<body>
+  <header class="site-header">
+    <a class="brand" href="#story" aria-label="Crimetor, к началу сценария">
+      <span class="brand-mark" aria-hidden="true">C</span>
+      <span>CRIMETOR</span>
+      <span class="brand-note">СЦЕНАРИЙ ДЕМО</span>
+    </a>
+    <nav class="chapter-nav" aria-label="Переход по сценарию">
+      <button type="button" data-jump="0">Сцена</button>
+      <button type="button" data-jump="0.62">Инцидент</button>
+      <button type="button" data-jump="0.91">Уведомление</button>
+      <a href="#pricing">Тарифы</a>
+    </nav>
+  </header>
+
+  <main>
+    <section class="story-track" id="story" aria-label="Демонстрационный сценарий Crimetor">
+      <div class="scene-sticky">
+        <div class="scene-meta"><span class="live-dot" aria-hidden="true"></span><span>Визуальный сценарий / аудитория 204</span></div>
+        <div class="visual-stage">
+          <svg id="classroom" class="classroom-art" viewBox="210 115 340 191.25" preserveAspectRatio="xMidYMid meet" role="img" aria-labelledby="art-title art-description">
+            <title id="art-title">Камера наблюдения в университетской аудитории</title>
+            <desc id="art-description">Прокрутка раскрывает аудиторию, человека с баллончиком у стены и демонстрационное уведомление на телефоне.</desc>
+            <defs>
+              <linearGradient id="wall" x2="0" y2="1">
+                <stop offset="0" stop-color="#1b2631" />
+                <stop offset="1" stop-color="#111923" />
+              </linearGradient>
+              <linearGradient id="floor" x2="0" y2="1">
+                <stop offset="0" stop-color="#252a30" />
+                <stop offset="1" stop-color="#101318" />
+              </linearGradient>
+              <linearGradient id="window" x2="1" y2="1">
+                <stop offset="0" stop-color="#334a55" />
+                <stop offset="1" stop-color="#9aa9a3" stop-opacity=".42" />
+              </linearGradient>
+              <linearGradient id="board" x2="0" y2="1">
+                <stop offset="0" stop-color="#203a3a" />
+                <stop offset="1" stop-color="#172c2d" />
+              </linearGradient>
+              <linearGradient id="phone-screen" x2="0" y2="1">
+                <stop offset="0" stop-color="#171d25" />
+                <stop offset="1" stop-color="#0d1117" />
+              </linearGradient>
+              <radialGradient id="lens-glow">
+                <stop offset="0" stop-color="#c7e0e6" stop-opacity=".88" />
+                <stop offset=".28" stop-color="#668d9b" stop-opacity=".8" />
+                <stop offset=".62" stop-color="#182f3b" />
+                <stop offset="1" stop-color="#070a0d" />
+              </radialGradient>
+              <pattern id="grain" width="9" height="9" patternUnits="userSpaceOnUse">
+                <circle cx="1" cy="2" r=".55" fill="#fff" opacity=".14" />
+                <circle cx="6" cy="7" r=".45" fill="#fff" opacity=".1" />
+              </pattern>
+              <filter id="soft-shadow" x="-50%" y="-50%" width="200%" height="200%">
+                <feGaussianBlur in="SourceAlpha" stdDeviation="18" result="blur" />
+                <feOffset dy="16" result="offset" />
+                <feComponentTransfer><feFuncA type="linear" slope=".48" /></feComponentTransfer>
+                <feMerge><feMergeNode /><feMergeNode in="SourceGraphic" /></feMerge>
+              </filter>
+              <filter id="paint-glow" x="-60%" y="-60%" width="220%" height="220%">
+                <feGaussianBlur stdDeviation="8" result="blur" />
+                <feMerge><feMergeNode in="blur" /><feMergeNode in="SourceGraphic" /></feMerge>
+              </filter>
+            </defs>
+
+            <rect width="1600" height="900" fill="#090d12" />
+            <rect x="0" y="0" width="1600" height="690" fill="url(#wall)" />
+            <path d="M0 689H1600V900H0Z" fill="url(#floor)" />
+            <path d="M0 688H1600" stroke="#59616a" stroke-opacity=".45" stroke-width="3" />
+            <path d="M0 748H1600M0 818H1600M0 870H1600" stroke="#84878a" stroke-opacity=".08" stroke-width="2" />
+            <path d="M190 690 0 900M510 690 370 900M820 690 750 900M1120 690 1160 900M1400 690 1540 900" fill="none" stroke="#9b9b94" stroke-opacity=".09" stroke-width="2" />
+            <rect x="0" y="0" width="1600" height="690" fill="url(#grain)" opacity=".34" />
+
+            <g id="architecture">
+              <path d="M60 105H365V442H60Z" fill="#0c141a" stroke="#64727a" stroke-opacity=".55" stroke-width="10" />
+              <rect x="76" y="121" width="273" height="305" fill="url(#window)" />
+              <path d="M211 121V426M76 275H349" stroke="#a6b1b0" stroke-opacity=".56" stroke-width="9" />
+              <path d="M83 412 211 285 344 410M82 170 210 274" fill="none" stroke="#d2d3c8" stroke-opacity=".12" stroke-width="3" />
+              <path d="M54 449H370" stroke="#c5cbc5" stroke-opacity=".2" stroke-width="4" />
+              <path d="M435 227H938V534H435Z" fill="#121a1e" stroke="#3b474a" stroke-width="9" />
+              <rect x="451" y="243" width="470" height="275" fill="url(#board)" />
+              <path d="M464 501H908" stroke="#d9ded3" stroke-opacity=".14" stroke-width="2" />
+              <path d="M483 265H730" stroke="#d9ded3" stroke-opacity=".06" stroke-width="2" />
+              <path d="M950 228V541" stroke="#626867" stroke-opacity=".36" stroke-width="4" />
+              <path d="M1348 116H1513V691H1348Z" fill="#11171d" stroke="#47525a" stroke-width="7" />
+              <rect x="1364" y="132" width="133" height="542" fill="#1b242c" />
+              <path d="M1390 133V673" stroke="#10151b" stroke-width="5" />
+              <circle cx="1474" cy="412" r="6" fill="#a59a7b" />
+              <path d="M41 87H1559" stroke="#71808a" stroke-opacity=".24" stroke-width="3" />
+              <path d="M64 686H1335" stroke="#a8b0ae" stroke-opacity=".1" stroke-width="3" />
+              <path d="M398 196H424M958 196H985" stroke="#b3b8b2" stroke-opacity=".26" stroke-width="3" />
+            </g>
+
+            <g id="camera-field" opacity="0">
+              <path d="M464 243 1258 342 1090 618Z" fill="#d9e9e2" fill-opacity=".055" />
+              <path d="M464 243 1258 342M464 243 1090 618" fill="none" stroke="#c4ded5" stroke-opacity=".16" stroke-width="2" stroke-dasharray="8 12" />
+            </g>
+
+            <g id="desks" fill="#161c22" stroke="#56616a" stroke-opacity=".45" stroke-width="5">
+              <path d="M208 687H575L548 730H182Z" />
+              <path d="M234 730V820M522 730V812" fill="none" />
+              <path d="M610 683H953L932 723H590Z" />
+              <path d="M634 723V812M921 723V807" fill="none" />
+              <path d="M1005 691H1273L1290 728H1023Z" />
+              <path d="M1047 728V811M1268 728V807" fill="none" />
+            </g>
+            <path d="M180 684H582M583 681H958M1004 689H1280" stroke="#93999a" stroke-opacity=".4" stroke-width="7" />
+            <path d="M264 680H362M658 679H739M1072 685H1146" stroke="#e0dfd6" stroke-opacity=".11" stroke-width="2" />
+
+            <g id="graffiti" fill="none" stroke-linecap="round" stroke-linejoin="round">
+              <path id="paint-stroke" d="M1031 461C1064 409 1087 482 1120 432S1176 390 1192 455 1238 486 1261 418M1059 493C1103 472 1129 493 1150 470S1190 443 1228 488" stroke="#ef5148" stroke-width="13" stroke-dasharray="560" stroke-dashoffset="560" filter="url(#paint-glow)" />
+              <path id="paint-detail" d="M1092 409 1100 443M1162 456 1171 488M1221 411 1232 445" stroke="#ffb3a7" stroke-width="4" stroke-dasharray="70" stroke-dashoffset="70" />
+              <circle id="paint-mist" cx="1190" cy="430" r="44" fill="#ef5148" fill-opacity=".16" stroke="none" opacity="0" />
+            </g>
+
+            <g id="person" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M1071 545 1050 656 1028 757M1110 547 1152 653 1160 757" fill="none" stroke="#10151a" stroke-width="25" />
+              <path d="M1023 757H1064M1144 757H1180" fill="none" stroke="#11151b" stroke-width="20" />
+              <path d="M1052 392C1070 374 1115 377 1132 403L1145 535C1114 557 1071 556 1041 536L1039 428Z" fill="#8e493e" stroke="#171c22" stroke-width="9" />
+              <path d="M1051 415 1018 486 1050 519" fill="none" stroke="#c08771" stroke-width="21" />
+              <g id="spray-arm">
+                <path d="M1120 411 1151 439 1182 418" fill="none" stroke="#c08771" stroke-width="19" />
+                <path d="M1182 418 1197 402" fill="none" stroke="#c08771" stroke-width="13" />
+                <g id="spray-can" transform="translate(1180 399) rotate(28)">
+                  <rect x="-5" y="-18" width="29" height="66" rx="7" fill="#242b32" stroke="#d7d9d2" stroke-opacity=".65" stroke-width="3" />
+                  <path d="M2-18V-27H18V-18" fill="#adb6b1" />
+                  <path d="M0 5H20" stroke="#ef5148" stroke-width="12" />
+                  <path d="M8-29H17" stroke="#ecebe4" stroke-width="4" />
+                </g>
+                <g id="paint-spray" opacity="0" fill="#ffc0b5">
+                  <circle cx="1209" cy="401" r="3" />
+                  <circle cx="1218" cy="396" r="2" />
+                  <circle cx="1224" cy="405" r="2.5" />
+                  <circle cx="1233" cy="397" r="1.8" />
+                  <path d="M1204 409 1242 390" fill="none" stroke="#ff8a77" stroke-opacity=".72" stroke-width="3" />
+                </g>
+              </g>
+              <path d="M1094 375V393" stroke="#a56e5c" stroke-width="18" />
+              <ellipse cx="1088" cy="348" rx="35" ry="41" fill="#b77b64" stroke="#171c22" stroke-width="7" />
+              <path d="M1054 349C1056 315 1086 297 1117 320L1127 350 1112 342 1098 327 1076 345 1054 358Z" fill="#20232a" />
+              <path d="M1070 354H1080M1099 352H1107" stroke="#1c2025" stroke-width="4" />
+              <path d="M1088 369 1102 370" stroke="#71483f" stroke-width="3" />
+              <path d="M1194 391 1221 380" stroke="#ff8a77" stroke-opacity=".7" stroke-width="4" />
+              <path d="M1016 488 1045 512" stroke="#e2e1d8" stroke-opacity=".35" stroke-width="3" />
+            </g>
+
+            <g id="detection" opacity="0" fill="none" stroke="#ef5148" stroke-width="4">
+              <path d="M1006 354V328H1032M1253 328H1279V354M1279 529V555H1253M1032 555H1006V529" />
+              <path d="M1006 441H1018M1267 441H1279" stroke-opacity=".72" />
+              <circle cx="1006" cy="441" r="5" fill="#ef5148" stroke="none" />
+            </g>
+
+            <g id="camera" transform="translate(255 155) rotate(20 90 42)" filter="url(#soft-shadow)">
+              <path d="M87 64 98 126 127 126 131 62" fill="#3a444b" stroke="#11171d" stroke-width="8" />
+              <path d="M88 125 118 125 129 144 74 144Z" fill="#657077" stroke="#11171d" stroke-width="7" />
+              <rect x="5" y="10" width="161" height="68" rx="14" fill="#d8d8ce" stroke="#202a31" stroke-width="9" />
+              <path d="M22 16 47 1H126L150 15" fill="#f0eee4" stroke="#202a31" stroke-width="8" />
+              <path d="M14 66H161" stroke="#8c9698" stroke-width="5" />
+              <path d="M150 26H194L218 38V61L195 69H150Z" fill="#879294" stroke="#202a31" stroke-width="8" />
+              <ellipse cx="211" cy="49" rx="15" ry="20" fill="#101820" stroke="#35434a" stroke-width="5" />
+              <ellipse cx="214" cy="49" rx="10" ry="14" fill="url(#lens-glow)" />
+              <circle cx="216" cy="44" r="3" fill="#f2f5ed" opacity=".8" />
+              <path d="M27 30H58" stroke="#98a2a0" stroke-width="4" />
+              <circle cx="33" cy="54" r="5" fill="#ef5148" />
+              <path d="M66 3V-10H111V3" fill="#4a555d" stroke="#202a31" stroke-width="6" />
+            </g>
+
+            <defs>
+            <g id="phone-device">
+              <g transform="translate(1171 237) rotate(-5 164 280)" filter="url(#soft-shadow)">
+                <rect x="0" y="0" width="328" height="570" rx="42" fill="#05070a" stroke="#717980" stroke-width="4" />
+                <rect x="11" y="11" width="306" height="548" rx="34" fill="url(#phone-screen)" />
+                <rect x="111" y="16" width="106" height="17" rx="9" fill="#05070a" />
+                <text x="29" y="65" fill="#f1f1ec" font-family="Arial, sans-serif" font-size="13" font-weight="700">9:41</text>
+                <text x="284" y="65" fill="#d7dad6" font-family="Arial, sans-serif" font-size="12" text-anchor="end">LTE  92%</text>
+                <path d="M27 89H301" stroke="#f2f2eb" stroke-opacity=".1" />
+                <text x="29" y="131" fill="#a4aab1" font-family="Arial, sans-serif" font-size="12" letter-spacing="1.2">ДЕМО / УВЕДОМЛЕНИЕ</text>
+                <rect x="25" y="153" width="278" height="214" rx="19" fill="#202833" stroke="#f2f2eb" stroke-opacity=".12" />
+                <rect x="43" y="171" width="28" height="28" rx="8" fill="#ef5148" />
+                <text x="57" y="190" fill="#fff" font-family="Arial, sans-serif" font-size="14" font-weight="700" text-anchor="middle">C</text>
+                <text x="81" y="184" fill="#f4f4ef" font-family="Arial, sans-serif" font-size="14" font-weight="700">Crimetor</text>
+                <text x="277" y="184" fill="#9da4ac" font-family="Arial, sans-serif" font-size="11" text-anchor="end">сейчас</text>
+                <text x="44" y="236" fill="#fff" font-family="Arial, sans-serif" font-size="28" font-weight="700">
+                  <tspan x="44" dy="0">Кабинет 204.</tspan>
+                  <tspan x="44" dy="31">Обнаружен акт</tspan>
+                  <tspan x="44" dy="31">вандализма</tspan>
+                </text>
+                <text x="44" y="333" fill="#acb2ba" font-family="Arial, sans-serif" font-size="12">Демонстрационный сценарий</text>
+                <path d="M24 397H304" stroke="#fff" stroke-opacity=".1" />
+                <circle cx="164" cy="531" r="17" fill="none" stroke="#737b83" stroke-width="3" />
+                <rect x="119" y="546" width="90" height="5" rx="3" fill="#e8e8e3" />
+              </g>
+            </g>
+            </defs>
+          </svg>
+          <div class="scene-3d" data-crimetor-scene3d aria-hidden="true"></div>
+        </div>
+
+        <div class="chapter-panel" aria-live="polite" aria-atomic="true">
+          <article class="chapter-card is-active" data-chapter="0">
+            <div class="chapter-kicker">01 / Наблюдение</div>
+            <h1>Сначала - только камера.</h1>
+            <p>Прокрутите, чтобы отдалить план и увидеть, что происходит в аудитории.</p>
+          </article>
+          <article class="chapter-card" data-chapter="1" aria-hidden="true">
+            <div class="chapter-kicker">02 / Контекст</div>
+            <h2>В кадре появляется аудитория.</h2>
+            <p>Камера направлена на стену. Человек наносит на нее краску из баллончика.</p>
+          </article>
+          <article class="chapter-card" data-chapter="2" aria-hidden="true">
+            <div class="chapter-kicker">03 / Фиксация</div>
+            <h2>Область действия выделена.</h2>
+            <p>Подсветка и штрихи показывают ход демонстрационной сцены.</p>
+          </article>
+          <article class="chapter-card" data-chapter="3" aria-hidden="true">
+            <div class="chapter-kicker">04 / Уведомление</div>
+            <h2>Сообщение на телефоне.</h2>
+            <p>Пример уведомления завершает сценарий.</p>
+            <p class="alert-copy">Кабинет 204. Обнаружен акт вандализма</p>
+          </article>
+        </div>
+        <div id="phone-reveal" class="phone-overlay" aria-hidden="true"><svg class="phone-art" viewBox="1148 218 380 610"><use href="#phone-device" /></svg></div>
+        <div class="scroll-cue"><span class="cue-line" aria-hidden="true"></span><span>Прокрутите сцену</span></div>
+        <div class="page-count" aria-label="Прогресс сценария"><strong id="chapter-number">01</strong> / 04</div>
+        <div class="progress-track" role="progressbar" aria-label="Прогресс сценария" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0"><div class="progress-fill" id="progress-fill"></div></div>
+      </div>
+    </section>
+
+    <section class="closing-note" aria-labelledby="demo-title">
+      <div>
+        <div class="closing-label">Примечание</div>
+        <h2 id="demo-title">Демо-сценарий</h2>
+      </div>
+      <p>Иллюстрация и сообщение на телефоне - часть условной сцены. Реальное видеонаблюдение, распознавание событий и отправка уведомлений здесь не подключены.</p>
+    </section>
+    <section class="pricing" id="pricing" aria-labelledby="pricing-title">
+      <div class="pricing-heading">
+        <h2 id="pricing-title">Тарифы</h2>
+        <p class="price-note">Предварительные тарифы. Условия для обсуждения.</p>
+        <p>Стоимость фиксированная за выбранный план при соблюдении лимита камер.</p>
+      </div>
+      <div class="plan-grid">
+        <article class="plan-card"><h3>Start</h3><p class="price">29 900 ₸ <small>/ месяц</small></p><p>Годом авансом: 304 980 ₸ (-15%)</p><ul><li>До 4 камер, 1 здание, 3 пользователя</li><li>Метаданные инцидентов за 7 дней</li><li>Оповещения о подозрении на вандализм</li></ul><button type="button" data-select-plan="start">Выбрать Start</button></article>
+        <article class="plan-card"><h3>Campus</h3><p class="price">99 900 ₸ <small>/ месяц</small></p><p>Годом авансом: 1 018 980 ₸ (-15%)</p><ul><li>До 16 камер, 3 здания, 10 пользователей</li><li>Метаданные инцидентов за 30 дней</li><li>Оповещения о подозрении на вандализм</li></ul><button type="button" data-select-plan="campus">Выбрать Campus</button></article>
+        <article class="plan-card"><h3>Network</h3><p class="price">249 900 ₸ <small>/ месяц</small></p><p>Годом авансом: 2 548 980 ₸ (-15%)</p><ul><li>До 48 камер, 10 зданий, 30 пользователей</li><li>Метаданные инцидентов за 90 дней</li><li>Оповещения о подозрении на вандализм</li></ul><button type="button" data-select-plan="network">Выбрать Network</button></article>
+      </div>
+      <p>Оборудование, подключение и настройка, а также архив видеозаписей рассчитываются отдельно.</p>
+      <form class="quote-form" id="quote-form" aria-labelledby="quote-title">
+        <div class="quote-heading">
+          <h3 id="quote-title">Черновик заявки</h3>
+          <p>Подготовьте запрос коммерческого предложения или счета и скачайте его на свое устройство.</p>
+        </div>
+        <label>Тариф<select name="plan" id="quote-plan"><option value="start">Start</option><option value="campus">Campus</option><option value="network">Network</option></select></label>
+        <label>Оплата<select name="period" id="quote-period"><option value="month">За месяц</option><option value="year">Годовая предоплата (-15%)</option></select></label>
+        <label>Количество камер<input name="cameras" id="quote-cameras" type="number" min="1" max="4" step="1" value="1" required></label>
+        <label>Организация<input name="organization" type="text" maxlength="120" autocomplete="organization" pattern=".*\S.*" title="Введите название организации" required></label>
+        <label>Рабочая почта<input name="email" type="email" maxlength="254" autocomplete="email" required></label>
+        <label>Запрос<select name="intent"><option>Запрос предложения</option><option>Запрос счета на оплату</option></select></label>
+        <output class="quote-total" id="quote-total" aria-live="polite">Итого: -</output>
+        <button id="quote-submit" type="submit" disabled>Скачать черновик</button>
+      </form>
+    </section>
+    <footer class="footer-line"><span>CRIMETOR / DEMO</span><span>Университетская аудитория / 204</span></footer>
+  </main>
+
+  <script>
+    (() => {
+      const track = document.querySelector(".story-track");
+      const art = document.getElementById("classroom");
+      const field = document.getElementById("camera-field");
+      const paint = document.getElementById("paint-stroke");
+      const paintDetail = document.getElementById("paint-detail");
+      const paintMist = document.getElementById("paint-mist");
+      const sprayArm = document.getElementById("spray-arm");
+      const detection = document.getElementById("detection");
+      const phone = document.getElementById("phone-reveal");
+      const cards = Array.from(document.querySelectorAll(".chapter-card"));
+      const fill = document.getElementById("progress-fill");
+      const progressTrack = document.querySelector(".progress-track");
+      const chapterNumber = document.getElementById("chapter-number");
+      const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)");
+      const state = { progress: 0 };
+
+      const clamp = (value, min, max) => Math.min(max, Math.max(min, value));
+      const smooth = (start, end, value) => {
+        const t = clamp((value - start) / (end - start), 0, 1);
+        return t * t * (3 - 2 * t);
+      };
+      const readProgress = () => {
+        const span = track.offsetHeight - window.innerHeight;
+        if (span <= 0) return 1;
+        return clamp(-track.getBoundingClientRect().top / span, 0, 1);
+      };
+
+      function render(progress) {
+        const p = clamp(progress, 0, 1);
+        state.progress = p;
+        window.CrimetorSceneProgress = p;
+        window.CrimetorScene3D?.setProgress(p);
+
+        const zoom = smooth(0, .43, p);
+        const x = 210 * (1 - zoom);
+        const y = 115 * (1 - zoom);
+        const width = 340 + 1260 * zoom;
+        const height = width * 9 / 16;
+        art.setAttribute("viewBox", `${x.toFixed(2)} ${y.toFixed(2)} ${width.toFixed(2)} ${height.toFixed(2)}`);
+
+        const sceneReveal = smooth(.22, .48, p);
+        field.setAttribute("opacity", (sceneReveal * .8).toFixed(3));
+        const paintProgress = smooth(.39, .66, p);
+        sprayArm.setAttribute("transform", `rotate(${(paintProgress * 4).toFixed(2)} 1120 411)`);
+        paint.setAttribute("stroke-dashoffset", String(560 * (1 - paintProgress)));
+        paintDetail.setAttribute("stroke-dashoffset", String(70 * (1 - paintProgress)));
+        paintMist.setAttribute("opacity", (smooth(.46, .63, p) * .72).toFixed(3));
+        detection.setAttribute("opacity", smooth(.58, .72, p).toFixed(3));
+
+        const phoneProgress = smooth(.72, .89, p);
+        phone.style.opacity = phoneProgress.toFixed(3);
+        phone.style.setProperty("--phone-offset", `${(1 - phoneProgress) * 420}px`);
+        phone.setAttribute("aria-hidden", phoneProgress < .5 ? "true" : "false");
+
+        const active = p < .35 ? 0 : p < .59 ? 1 : p < .79 ? 2 : 3;
+        cards.forEach((card, index) => {
+          const visible = reducedMotion.matches || index === active;
+          card.classList.toggle("is-active", index === active);
+          card.setAttribute("aria-hidden", visible ? "false" : "true");
+        });
+        chapterNumber.textContent = String(active + 1).padStart(2, "0");
+        fill.style.width = `${(p * 100).toFixed(1)}%`;
+        progressTrack.setAttribute("aria-valuenow", String(Math.round(p * 100)));
+      }
+
+      function jumpTo(progress) {
+        const target = Number(progress);
+        if (reducedMotion.matches) {
+          const index = target < .35 ? 0 : target < .7 ? 2 : 3;
+          cards[index].scrollIntoView({ behavior: "auto", block: "center" });
+          return;
+        }
+        const pageTop = window.scrollY + track.getBoundingClientRect().top;
+        const scrollSpan = track.offsetHeight - window.innerHeight;
+        window.scrollTo({ top: pageTop + scrollSpan * target, behavior: "smooth" });
+      }
+
+      document.querySelectorAll("[data-jump]").forEach((button) => {
+        button.addEventListener("click", () => jumpTo(button.dataset.jump));
+      });
+
+      function start() {
+        if (reducedMotion.matches) {
+          document.body.classList.add("reduced-motion-story");
+          render(1);
+          return;
+        }
+
+        if (window.gsap && window.ScrollTrigger) {
+          window.gsap.registerPlugin(window.ScrollTrigger);
+          window.gsap.to(state, {
+            progress: 1,
+            ease: "none",
+            scrollTrigger: {
+              trigger: track,
+              start: "top top",
+              end: "bottom bottom",
+              scrub: .35,
+              onUpdate: (self) => render(self.progress)
+            }
+          });
+          window.ScrollTrigger.refresh();
+        } else {
+          window.addEventListener("scroll", () => render(readProgress()), { passive: true });
+          window.addEventListener("resize", () => render(readProgress()));
+          render(readProgress());
+        }
+      }
+
+      reducedMotion.addEventListener("change", () => window.location.reload());
+      if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", start, { once: true });
+      else start();
+    })();
+  </script>
+  <script>
+    (() => {
+      const plans = { start: { monthly: 29900, cameras: 4 }, campus: { monthly: 99900, cameras: 16 }, network: { monthly: 249900, cameras: 48 } };
+      const form = document.getElementById("quote-form");
+      const plan = document.getElementById("quote-plan");
+      const period = document.getElementById("quote-period");
+      const cameras = document.getElementById("quote-cameras");
+      const total = document.getElementById("quote-total");
+      const submit = document.getElementById("quote-submit");
+      const money = new Intl.NumberFormat("ru-KZ");
+      const annualDiscount = 0.15;
+      const quoteAmount = () => {
+        const monthly = plans[plan.value].monthly;
+        return period.value === "year" ? Math.round(monthly * 12 * (1 - annualDiscount)) : monthly;
+      };
+
+      function updateTotal() {
+        total.textContent = `Итого: ${money.format(quoteAmount())} ₸ ${period.value === "year" ? "за год" : "за месяц"}`;
+      }
+
+      function updatePlan() {
+        const selected = plans[plan.value];
+        cameras.max = String(selected.cameras);
+        if (Number(cameras.value) > selected.cameras) cameras.value = String(selected.cameras);
+        updateTotal();
+      }
+      plan.addEventListener("change", updatePlan);
+      period.addEventListener("change", updateTotal);
+      document.querySelectorAll("[data-select-plan]").forEach((button) => button.addEventListener("click", () => {
+        plan.value = button.dataset.selectPlan;
+        updatePlan();
+        form.scrollIntoView({ block: "start" });
+        plan.focus({ preventScroll: true });
+      }));
+      form.addEventListener("submit", (event) => {
+        event.preventDefault();
+        if (!form.reportValidity()) return;
+        const data = new FormData(form);
+        const lines = [
+          "Черновик запроса Crimetor (не является счетом к оплате)",
+          `Организация: ${data.get("organization").trim()}`,
+          `Рабочая почта: ${data.get("email")}`,
+          `Запрос: ${data.get("intent")}`,
+          `Тариф: ${plan.options[plan.selectedIndex].text}`,
+          `Период: ${period.value === "year" ? "год" : "месяц"}`,
+          `Камер: ${cameras.value} из ${plans[plan.value].cameras}`,
+          `Итого: ${money.format(quoteAmount())} ₸`,
+          `Дата: ${new Date().toLocaleDateString("ru-KZ")}`
+        ];
+        const url = URL.createObjectURL(new Blob(["\uFEFF", lines.join("\r\n")], { type: "text/plain;charset=utf-8" }));
+        const link = document.createElement("a");
+        link.href = url;
+        link.download = `crimetor-${plan.value}-request.txt`;
+        link.click();
+        setTimeout(() => URL.revokeObjectURL(url), 1000);
+      });
+      updatePlan();
+      submit.disabled = false;
+    })();
+  </script>
+</body>
+</html>

@@ -1,0 +1,26 @@
+.venv/
+__pycache__/
+.pytest_cache/
+*.pyc
+runs/
+.env
+CLAUDE.md
+
+#Веса и модели
+weights/*
+*.pt
+*.engine
+*.onnx
+!weights/README.md
+
+#Данные
+data/*
+!data/.gitkeep
+!data/manifest.csv
+!data/annotations/
+!data/splits/
+*.mp4
+*.avi
+
+#Тестовая картинка
+bus.jpg

@@ -20,7 +20,7 @@
       <nav class="site-nav" aria-label="Главная навигация">
         <a href="./index.html">Демо</a>
         <a href="./assistant.html">ИИ-помощник</a>
-        <a href="#quote-form">Черновик заявки</a>
+        <a href="#quote-form">Заявка и оплата</a>
       </nav>
     </div>
   </header>
@@ -72,9 +72,9 @@
 
       <form class="quote-form" id="quote-form" aria-labelledby="quote-title">
         <div class="quote-heading">
-          <h3 id="quote-title">Черновик заявки</h3>
-          <p>Подготовьте запрос коммерческого предложения или счета и скачайте его на свое устройство. Данные формы никуда не отправляются.</p>
-          <p class="pricing-footnote">Оплата через Stripe запланирована.</p>
+          <h3 id="quote-title">Заявка и оплата</h3>
+          <p>Заполните все поля, затем оплатите выбранный тариф через Stripe или скачайте черновик заявки на свое устройство.</p>
+          <p class="pricing-footnote">При оплате тариф, период, число камер, организация и почта передаются в Stripe. Данные карты вводятся только на защищенной странице Stripe. Черновик никуда не отправляется.</p>
         </div>
         <label>Тариф
           <select name="plan" id="quote-plan">
@@ -96,7 +96,7 @@
           <input name="organization" type="text" maxlength="120" autocomplete="organization" pattern=".*\S.*" title="Введите название организации" required>
         </label>
         <label>Рабочая почта
-          <input name="email" type="email" maxlength="254" autocomplete="email" required>
+          <input name="email" type="email" maxlength="254" autocomplete="email" pattern="[^@\s]+@[^@\s]+\.[^@\s]+" title="Введите почту вида name@company.kz" required>
         </label>
         <label>Запрос
           <select name="intent">
@@ -105,7 +105,9 @@
           </select>
         </label>
         <output class="quote-total" id="quote-total" aria-live="polite">Итого: -</output>
-        <button id="quote-submit" type="submit" disabled>Скачать черновик</button>
+        <button class="button-primary" id="quote-pay" type="submit" disabled>Оплатить через Stripe</button>
+        <button class="button-secondary" id="quote-download" type="button" disabled>Скачать черновик</button>
+        <p class="quote-status" id="quote-status" role="status" aria-live="polite"></p>
       </form>
     </section>
   </main>
@@ -120,8 +122,11 @@
       const period = document.getElementById("quote-period");
       const cameras = document.getElementById("quote-cameras");
       const total = document.getElementById("quote-total");
-      const submit = document.getElementById("quote-submit");
+      const pay = document.getElementById("quote-pay");
+      const download = document.getElementById("quote-download");
+      const status = document.getElementById("quote-status");
       const money = new Intl.NumberFormat("ru-KZ");
+      let paying = false;
       const annualDiscount = 0.15;
       const quoteAmount = () => {
         const monthly = plans[plan.value].monthly;
@@ -132,22 +137,76 @@
         total.textContent = `Итого: ${money.format(quoteAmount())} ₸ ${period.value === "year" ? "за год" : "за месяц"}`;
       }
 
+      function setStatus(text, tone = "") {
+        status.textContent = text;
+        status.dataset.tone = tone;
+      }
+
+      // Pay and download unlock only when every field is filled in correctly.
+      function syncButtons() {
+        const ready = form.checkValidity();
+        pay.disabled = !ready || paying;
+        download.disabled = !ready;
+        // A hint never replaces a payment result or an error message.
+        if (paying || status.dataset.tone) return;
+        setStatus(ready ? "" : "Заполните все поля, чтобы перейти к оплате.");
+      }
+
       function updatePlan() {
         const selected = plans[plan.value];
         cameras.max = String(selected.cameras);
         if (Number(cameras.value) > selected.cameras) cameras.value = String(selected.cameras);
         updateTotal();
+        syncButtons();
       }
       plan.addEventListener("change", updatePlan);
       period.addEventListener("change", updateTotal);
+      form.addEventListener("input", syncButtons);
+      form.addEventListener("change", syncButtons);
       document.querySelectorAll("[data-select-plan]").forEach((button) => button.addEventListener("click", () => {
         plan.value = button.dataset.selectPlan;
         updatePlan();
         form.scrollIntoView({ block: "start" });
         plan.focus({ preventScroll: true });
       }));
-      form.addEventListener("submit", (event) => {
+      form.addEventListener("submit", async (event) => {
         event.preventDefault();
+        if (paying || !form.reportValidity()) return;
+        if (location.protocol === "file:") {
+          setStatus("Оплата работает только через сервер: запустите server.py в папке landing и откройте http://localhost:8000/pricing.html", "error");
+          return;
+        }
+        const data = new FormData(form);
+        paying = true;
+        syncButtons();
+        pay.textContent = "Переходим к оплате...";
+        setStatus("Создаем страницу оплаты Stripe...", "info");
+        try {
+          const response = await fetch("/api/checkout", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              plan: plan.value,
+              period: period.value,
+              cameras: Number(cameras.value),
+              organization: data.get("organization").trim(),
+              email: data.get("email").trim()
+            })
+          });
+          const result = await response.json().catch(() => ({}));
+          if (!response.ok || !result.url) {
+            throw new Error(typeof result.detail === "string" ? result.detail : "Не удалось создать оплату. Проверьте данные и попробуйте снова.");
+          }
+          window.location.assign(result.url);
+        } catch (error) {
+          paying = false;
+          pay.textContent = "Оплатить через Stripe";
+          setStatus(error instanceof TypeError ? "Сервер оплаты недоступен. Проверьте, что server.py запущен." : error.message, "error");
+          syncButtons();
+        }
+      });
+
+      download.addEventListener("click", () => {
         if (!form.reportValidity()) return;
         const data = new FormData(form);
         const lines = [
@@ -168,8 +227,38 @@
         link.click();
         setTimeout(() => URL.revokeObjectURL(url), 1000);
       });
+
+      // Buyer returned from Stripe. The status is informational; access is granted by the server webhook.
+      async function showCheckoutResult() {
+        const params = new URLSearchParams(location.search);
+        const result = params.get("checkout");
+        if (!result) return;
+        const sessionId = params.get("session_id");
+        history.replaceState(null, "", location.pathname + location.hash);
+        form.scrollIntoView({ block: "start" });
+        if (result === "cancel") {
+          setStatus("Оплата отменена. Можно изменить данные и попробовать снова.", "info");
+          return;
+        }
+        if (result !== "success" || !sessionId) return;
+        setStatus("Проверяем статус оплаты...", "info");
+        try {
+          const response = await fetch(`/api/checkout/${encodeURIComponent(sessionId)}`);
+          const info = await response.json().catch(() => ({}));
+          if (!response.ok) throw new Error(typeof info.detail === "string" ? info.detail : "Не удалось получить статус оплаты.");
+          const periodText = info.period === "year" ? "за год" : "за месяц";
+          if (info.payment_status === "paid") {
+            setStatus(`Оплата прошла: ${info.plan}, ${periodText}, ${money.format(info.amount)} ₸. Мы свяжемся с вами для подключения.`, "ok");
+          } else {
+            setStatus("Платеж еще обрабатывается. Статус придет на почту, указанную при оплате.", "info");
+          }
+        } catch (error) {
+          setStatus(error.message, "error");
+        }
+      }
+
       updatePlan();
-      submit.disabled = false;
+      showCheckoutResult();
     })();
   </script>
 </body>

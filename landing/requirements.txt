@@ -1,0 +1,4 @@
+fastapi>=0.165
+uvicorn>=0.54
+stripe>=17.1
+python-dotenv>=1.2

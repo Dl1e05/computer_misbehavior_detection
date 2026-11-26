@@ -117,6 +117,12 @@ a:focus-visible, button:focus-visible, input:focus-visible, select:focus-visible
 .quote-total { align-self: end; color: var(--paper); font-weight: 650; line-height: 44px; }
 .quote-form button { align-self: end; }
 .quote-form button:disabled { cursor: not-allowed; opacity: .55; }
+.quote-form .button-primary { border-color: var(--red); background: rgba(239, 81, 72, .12); font-weight: 650; }
+.quote-form .button-primary:hover:not(:disabled) { background: rgba(239, 81, 72, .22); }
+.quote-form .button-secondary { background: transparent; color: #d2d0ca; }
+.quote-status { grid-column: 1 / -1; min-height: 21px; margin: 0; color: #b5b8bd; font-size: 13px; line-height: 1.6; }
+.quote-status[data-tone="ok"] { color: #8fd6a6; }
+.quote-status[data-tone="error"] { color: var(--red); }
 .footer-line { display: flex; justify-content: space-between; gap: 16px; padding: 18px 24px; border-top: 1px solid var(--line); color: #707780; font-size: 9px; letter-spacing: .1em; }
 
 .chat-card { border: 1px solid var(--line); background: #0c0f14; }

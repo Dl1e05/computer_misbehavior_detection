@@ -3,7 +3,12 @@
   const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)');
   if (!host || reducedMotion.matches) return;
   const clamp = (value) => Math.max(0, Math.min(1, value));
-  let progress = clamp(Number(window.CrimetorSceneProgress) || 0);
+  const initialProgress = Number(host.dataset.progress);
+  let state = {
+    progress: Number.isFinite(initialProgress) ? clamp(initialProgress) : 0,
+    scenario: host.dataset.scenario === 'fight' ? 'fight' : 'vandalism',
+    character: host.dataset.character === 'jacket' ? 'jacket' : 'hoodie'
+  };
   let scene, renderer, resizeObserver, renderScene, resizeScene, canvas;
   let stopped = false;
 
@@ -51,13 +56,21 @@
     draw(true);
   }
 
-  reducedMotion.addEventListener('change', onMotionPreference);
-  window.CrimetorScene3D = { setProgress(value) {
-    const next = clamp(Number(value) || 0);
-    if (next === progress) return;
-    progress = next;
+  function setState(next) {
+    if (!next || typeof next !== 'object') return;
+    const value = Number(next.progress);
+    const updated = {
+      progress: Number.isFinite(value) ? clamp(value) : 0,
+      scenario: next.scenario === 'fight' ? 'fight' : 'vandalism',
+      character: next.character === 'jacket' ? 'jacket' : 'hoodie'
+    };
+    if (updated.progress === state.progress && updated.scenario === state.scenario && updated.character === state.character) return;
+    state = updated;
     draw();
-  } };
+  }
+
+  reducedMotion.addEventListener('change', onMotionPreference);
+  window.CrimetorScene3D = { setState };
 
   import('https://cdn.jsdelivr.net/npm/three@0.180.0/build/three.module.js').then((T) => {
     if (stopped) return;
@@ -90,6 +103,7 @@
     scene.add(room);
 
     function roundedBox(size, radius) {
+      radius = Math.max(0, Math.min(radius, ...size.map((value) => value * 0.49)));
       const geometry = new T.BoxGeometry(1, 1, 1, 8, 8, 8);
       const position = geometry.attributes.position;
       const normal = geometry.attributes.normal;
@@ -227,64 +241,133 @@
     }
     graffiti.add(detection);
 
-    const actor = new T.Group();
-    actor.position.z = -4.02;
-    actor.rotation.y = -2.2;
-    room.add(actor);
-    const skin = material(0xe6aa81), hoodie = material(0xb5523c), hoodTrim = material(0x77352d);
-    const cord = material(0xe7c5a4), pants = material(0x354350), shoes = material(0x28323a);
-    const hair = material(0x382723), eyes = material(0x26242a), whites = material(0xf5e7dc);
-    const torso = new T.Mesh(new T.CapsuleGeometry(0.39, 0.62, 8, 16), hoodie);
-    torso.position.y = 1.59;
-    torso.scale.z = 0.79;
-    torso.castShadow = torso.receiveShadow = true;
-    actor.add(torso);
-    box(actor, [0.41, 0.22, 0.09], [0, 1.37, 0.266], hoodTrim, 0.03);
-    for (const x of [-0.10, 0.10]) box(actor, [0.026, 0.28, 0.035], [x, 1.98, 0.277], cord, 0.009);
-    sphere(actor, 0.23, [0, 2.16, 0.02], hoodTrim, [1.25, 0.5, 1]);
+    function createStudent(style, colors = {}) {
+      const actor = new T.Group();
+      const isHoodie = style === 'hoodie';
+      const clothes = material(colors.clothes ?? (isHoodie ? 0xb5523c : 0x3267a8));
+      const trim = material(colors.trim ?? (isHoodie ? 0x77352d : 0xf0c55d));
+      const skin = material(colors.skin ?? 0xe6aa81);
+      const cord = material(colors.cord ?? 0xe7c5a4);
+      const pants = material(colors.pants ?? 0x354350);
+      const shoes = material(colors.shoes ?? 0x28323a);
+      const hair = material(colors.hair ?? 0x382723);
+      const eyes = material(0x26242a), whites = material(0xf5e7dc);
+      const torso = new T.Mesh(
+        isHoodie ? new T.CapsuleGeometry(0.46, 0.58, 6, 12) : roundedBox([1.02, 1.12, 0.70], 0.17),
+        clothes
+      );
+      torso.position.y = isHoodie ? 1.59 : 1.53;
+      torso.scale.z = isHoodie ? 0.76 : 1;
+      torso.castShadow = torso.receiveShadow = true;
+      actor.add(torso);
 
-    const head = new T.Group();
-    head.position.y = 2.51;
-    actor.add(head);
-    sphere(head, 0.365, [0, 0, -0.075], hoodie, [0.99, 1.08, 0.93]);
-    sphere(head, 0.32, [0, 0, 0.042], hoodTrim, [0.98, 1.08, 0.85]);
-    sphere(head, 0.298, [0, -0.025, 0.11], skin, [0.86, 1.04, 0.79]);
-    sphere(head, 0.251, [0, 0.18, 0.13], hair, [0.93, 0.38, 0.81]);
-    sphere(head, 0.067, [0, -0.056, 0.33], skin, [0.79, 0.83, 1]);
-    box(head, [0.089, 0.022, 0.025], [0.01, -0.151, 0.305], hoodTrim, 0.008);
-    for (const x of [-1, 1]) {
-      sphere(head, 0.063, [x * 0.252, -0.066, 0.14], skin, [0.75, 1.15, 0.66]);
-      sphere(head, 0.051, [x * 0.106, 0.028, 0.317], whites, [0.97, 1, 0.45]);
-      sphere(head, 0.028, [x * 0.103, 0.028, 0.338], eyes, [0.94, 1, 0.43]);
-      const brow = box(head, [0.08, 0.025, 0.029], [x * 0.108, 0.101, 0.314], hair, 0.01);
-      brow.rotation.z = x * -0.13;
+      if (isHoodie) {
+        box(actor, [0.54, 0.26, 0.08], [0, 1.37, 0.305], trim, 0.085);
+        box(actor, [0.42, 0.12, 0.055], [0, 1.37, 0.353], clothes, 0.04);
+        for (const x of [-0.115, 0.115]) box(actor, [0.028, 0.30, 0.035], [x, 1.98, 0.286], cord, 0.012);
+      } else {
+        box(actor, [0.68, 0.20, 0.22], [0, 2.09, -0.24], trim, 0.065);
+        box(actor, [0.53, 0.30, 0.09], [0, 1.48, -0.367], trim, 0.035);
+        box(actor, [0.075, 0.62, 0.045], [0, 1.51, -0.37], clothes, 0.018);
+        box(actor, [0.86, 0.105, 0.045], [0, 1.13, -0.365], trim, 0.025);
+        const stripeA = box(actor, [0.47, 0.085, 0.045], [-0.18, 1.86, -0.379], trim, 0.022);
+        const stripeB = box(actor, [0.47, 0.085, 0.045], [0.18, 1.86, -0.379], trim, 0.022);
+        stripeA.rotation.z = 0.26;
+        stripeB.rotation.z = -0.26;
+        box(actor, [0.20, 0.22, 0.045], [0.31, 1.51, -0.382], cord, 0.025);
+        box(actor, [0.27, 0.17, 0.06], [0.34, 1.98, -0.34], trim, 0.035);
+      }
+
+      const head = new T.Group();
+      head.position.y = 2.51;
+      actor.add(head);
+      if (isHoodie) {
+        sphere(head, 0.35, [0, 0, -0.145], clothes, [1.05, 1.08, 0.74]);
+      } else {
+        sphere(head, 0.30, [0.015, -0.015, -0.09], hair, [1.13, 0.78, 0.84]);
+        sphere(head, 0.22, [-0.13, 0.16, -0.075], hair, [1.22, 0.47, 0.78]);
+      }
+      sphere(head, 0.305, [0, -0.025, 0.11], skin, [0.87, 1.04, 0.80]);
+      sphere(head, 0.246, [0, 0.18, 0.13], hair, [0.96, 0.38, 0.78]);
+      sphere(head, 0.071, [0, -0.068, 0.33], skin, [0.79, 0.8, 1]);
+      box(head, [0.10, 0.025, 0.026], [0, -0.16, 0.305], trim, 0.009);
+      for (const x of [-1, 1]) {
+        sphere(head, 0.068, [x * 0.258, -0.071, 0.145], skin, [0.75, 1.12, 0.68]);
+        sphere(head, 0.057, [x * 0.112, 0.026, 0.323], whites, [0.98, 1, 0.46]);
+        sphere(head, 0.031, [x * 0.108, 0.026, 0.345], eyes, [0.94, 1, 0.44]);
+        const brow = box(head, [0.092, 0.028, 0.03], [x * 0.113, 0.108, 0.321], hair, 0.012);
+        brow.rotation.z = x * -0.16;
+      }
+
+      const legs = [-1, 1].map((side) => ({
+        side,
+        leg: limb(actor, 0.17, pants),
+        shoe: box(actor, [0.37, 0.18, 0.53], [0, 0, 0], shoes, 0.07),
+        sole: box(actor, [0.37, 0.06, 0.54], [0, 0, 0], cord, 0.025)
+      }));
+      const arms = [-1, 1].map((side) => {
+        const sleeve = isHoodie ? clothes : trim;
+        const upper = limb(actor, 0.17, sleeve), forearm = limb(actor, 0.145, sleeve);
+        const elbow = sphere(actor, 0.16, [0, 0, 0], sleeve);
+        const hand = sphere(actor, 0.13, [0, 0, 0], skin);
+        return { side, upper, forearm, elbow, hand, shoulder: vector(side * 0.39, 2.07, 0) };
+      });
+      return { actor, head, legs, arms, cord, shoes };
     }
 
-    const legs = [-1, 1].map((side) => ({
-      side,
-      leg: limb(actor, 0.164, pants),
-      shoe: box(actor, [0.35, 0.17, 0.52], [0, 0, 0], shoes, 0.065),
-      sole: box(actor, [0.35, 0.059, 0.53], [0, 0, 0], cord, 0.024)
-    }));
-    pose(limb(actor, 0.145, hoodie), vector(-0.33, 2.10, 0), vector(-0.49, 1.68, 0.07));
-    pose(limb(actor, 0.125, hoodie), vector(-0.49, 1.68, 0.07), vector(-0.36, 1.43, 0.23));
-    sphere(actor, 0.112, [-0.36, 1.44, 0.24], skin);
-    const shoulder = vector(0.33, 2.10, 0);
-    const upper = limb(actor, 0.147, hoodie), forearm = limb(actor, 0.126, hoodie);
-    const elbow = new T.Vector3(), wrist = new T.Vector3();
-    const restingWrist = vector(0.39, 1.56, 0.33);
-    const hand = sphere(actor, 0.13, [0, 0, 0], skin);
-    const can = new T.Group();
-    actor.add(can);
-    const sprayDistance = vector(0.24, 0, 0.28);
-    can.rotation.y = Math.atan2(-sprayDistance.x, -sprayDistance.z) - actor.rotation.y;
-    cylinder(can, [0.102, 0.102], 0.36, [0, 0.015, 0], material(0xed6253, 0.43));
-    cylinder(can, [0.106, 0.106], 0.087, [0, -0.044, 0], cord);
-    cylinder(can, [0.106, 0.106], 0.028, [0, -0.165, 0], metal);
-    cylinder(can, [0.073, 0.10], 0.044, [0, 0.196, 0], metal);
-    box(can, [0.087, 0.052, 0.123], [0, 0.24, 0.033], shoes, 0.021);
-    sphere(can, 0.023, [0, 0.24, 0.096], cord, [1, 1, 0.5]);
-    const nozzleOffset = vector(0, 0.24, 0.10).applyQuaternion(can.quaternion);
+    function createCan(actor, actorYaw, cord, shoes) {
+      const can = new T.Group();
+      actor.add(can);
+      const sprayDistance = vector(0.24, 0, 0.28);
+      can.rotation.y = Math.atan2(-sprayDistance.x, -sprayDistance.z) - actorYaw;
+      cylinder(can, [0.102, 0.102], 0.36, [0, 0.015, 0], material(0xed6253, 0.43));
+      cylinder(can, [0.106, 0.106], 0.087, [0, -0.044, 0], cord);
+      cylinder(can, [0.106, 0.106], 0.028, [0, -0.165, 0], metal);
+      cylinder(can, [0.073, 0.10], 0.044, [0, 0.196, 0], metal);
+      box(can, [0.087, 0.052, 0.123], [0, 0.24, 0.033], shoes, 0.021);
+      sphere(can, 0.023, [0, 0.24, 0.096], cord, [1, 1, 0.5]);
+      return { can, sprayDistance, nozzleOffset: vector(0, 0.24, 0.10).applyQuaternion(can.quaternion) };
+    }
+
+    const vandalism = new T.Group();
+    room.add(vandalism);
+    const vandalists = {
+      hoodie: createStudent('hoodie'),
+      jacket: createStudent('jacket')
+    };
+    for (const rig of Object.values(vandalists)) {
+      rig.actor.position.z = -4.02;
+      rig.actor.rotation.y = -2.2;
+      vandalism.add(rig.actor);
+      rig.can = createCan(rig.actor, rig.actor.rotation.y, rig.cord, rig.shoes);
+    }
+
+    const fightScene = new T.Group();
+    room.add(fightScene);
+    const fighters = [
+      createStudent('hoodie', { clothes: 0xe58a43, trim: 0x963f32, pants: 0x344b70, hair: 0x35241f }),
+      createStudent('jacket', { clothes: 0x397db1, trim: 0xd6e5e7, pants: 0x4a4854, hair: 0x2b2525 })
+    ];
+    const fighterMarkers = [];
+    for (let index = 0; index < fighters.length; index++) {
+      const rig = fighters[index];
+      rig.side = index === 0 ? 1 : -1;
+      rig.actor.position.set(index === 0 ? -1.45 : 1.45, 0, 0.8);
+      rig.actor.rotation.y = index === 0 ? 0.48 : -0.48;
+      fightScene.add(rig.actor);
+      const marker = new T.Group();
+      marker.visible = false;
+      for (const x of [-1, 1]) for (const y of [-1, 1]) {
+        plane(marker, [0.22, 0.03], [x * 0.55, 1.45 + y * 1.36, 0], [0, 0, 0], bracket);
+        plane(marker, [0.03, 0.25], [x * 0.67, 1.45 + y * (1.36 - 0.125), 0], [0, 0, 0], bracket);
+      }
+      const markerDepth = 0.84, markerYaw = rig.actor.rotation.y;
+      marker.position.set(-Math.tan(markerYaw) * markerDepth, 0, markerDepth);
+      marker.rotation.y = -markerYaw;
+      rig.actor.add(marker);
+      fighterMarkers.push(marker);
+    }
+
     const mistMaterial = new T.MeshBasicMaterial({ color: 0xffbea7, toneMapped: false });
     const mist = Array.from({ length: 12 }, (_, index) => {
       const particle = sphere(room, 0.012 + (index % 3) * 0.006, [0, 0, 0], mistMaterial);
@@ -328,25 +411,34 @@
       renderer.setSize(w, h, false);
     };
     const ease = (start, end) => {
-      const amount = clamp((progress - start) / (end - start));
+      const amount = clamp((state.progress - start) / (end - start));
       return amount * amount * (3 - 2 * amount);
     };
     const closePosition = cctv.position.clone().addScaledVector(lensDirection, 1.91).add(vector(0, 0.18, 0.80));
     const closeTarget = cctv.position.clone().addScaledVector(lensDirection, 0.19);
     const widePosition = vector(-2.32, 3.36, 5.42);
     const wideTarget = vector(0.13, 2.14, -3.27);
-    const look = new T.Vector3();
-    const mark = new T.Vector3(), sprayOrigin = new T.Vector3(), gaze = new T.Vector3();
+    const fightWidePosition = vector(-2.32, 3.38, 6.25);
+    const fightWideTarget = vector(0.04, 1.55, -0.18);
+    const look = new T.Vector3(), mark = new T.Vector3(), sprayOrigin = new T.Vector3();
+    const gaze = new T.Vector3(), elbow = new T.Vector3(), wrist = new T.Vector3();
     const hip = new T.Vector3(), ankle = new T.Vector3();
+    const restingWrist = vector(0.39, 1.56, 0.33);
 
     renderScene = function () {
+      const { progress, scenario, character } = state;
       const wide = ease(0, 0.43);
-      camera.position.copy(closePosition).lerp(widePosition, wide);
-      camera.lookAt(look.copy(closeTarget).lerp(wideTarget, wide));
+      const targetPosition = scenario === 'fight' ? fightWidePosition : widePosition;
+      const targetLook = scenario === 'fight' ? fightWideTarget : wideTarget;
+      camera.position.copy(closePosition).lerp(targetPosition, wide);
+      camera.lookAt(look.copy(closeTarget).lerp(targetLook, wide));
 
       const first = ease(0.37, 0.55), second = ease(0.571, 0.68);
-      reveal(paint, first);
-      reveal(accent, second);
+      const vandalismActive = scenario === 'vandalism';
+      const paintProgress = vandalismActive ? first : 0;
+      const accentProgress = vandalismActive ? second : 0;
+      reveal(paint, paintProgress);
+      reveal(accent, accentProgress);
       if (progress <= 0.55) paint.curve.getPointAt(first, mark);
       else if (progress >= 0.571) accent.curve.getPointAt(second, mark);
       else mark.copy(paintEnd).lerp(accentStart, ease(0.55, 0.571));
@@ -355,40 +447,97 @@
       const reach = ease(0.28, 0.37) * (1 - ease(0.68, 0.76));
       const stepping = progress <= 0.55 ? first : second;
       const stride = 0.105 * Math.sin(7 * Math.PI * stepping) * reach;
-      actor.position.x = mark.x + 0.92 + 0.23 * ease(0.68, 0.77);
-      for (const { side, leg, shoe, sole } of legs) {
-        const lift = Math.max(0, side * stride) * 0.42;
-        ankle.set(side * 0.23, 0.15 + lift, side * stride);
-        hip.set(side * 0.185, 1.06, 0);
-        pose(leg, hip, ankle);
-        shoe.position.set(ankle.x, 0.113 + lift, ankle.z + 0.089);
-        sole.position.set(ankle.x, 0.035 + lift, ankle.z + 0.089);
-      }
-      sprayOrigin.copy(mark).add(sprayDistance);
-      actor.worldToLocal(wrist.copy(sprayOrigin)).sub(nozzleOffset);
-      wrist.lerp(restingWrist, 1 - reach);
-      elbow.set(0.38 + reach * 0.06, 1.68 + reach * (0.28 + (mark.y - 2.62) * 0.43), 0.12 + reach * 0.27);
-      pose(upper, shoulder, elbow);
-      pose(forearm, elbow, wrist);
-      hand.position.copy(wrist);
-      hand.position.x += 0.092;
-      can.position.copy(wrist);
-      actor.worldToLocal(gaze.copy(mark).lerp(cctv.position, ease(0.71, 0.81)));
-      gaze.sub(head.position);
-      head.rotation.y = Math.max(-0.54, Math.min(0.55, Math.atan2(gaze.x, gaze.z)));
-      head.rotation.x = Math.max(-0.25, Math.min(0.25, -gaze.y * 0.31));
+      vandalism.visible = vandalismActive;
+      for (const [style, rig] of Object.entries(vandalists)) {
+        rig.actor.visible = vandalismActive && character === style;
+        if (!rig.actor.visible) continue;
+        rig.actor.position.x = mark.x + 0.92 + 0.23 * ease(0.68, 0.77);
+        for (const { side, leg, shoe, sole } of rig.legs) {
+          const lift = Math.max(0, side * stride) * 0.42;
+          ankle.set(side * 0.23, 0.15 + lift, side * stride);
+          hip.set(side * 0.185, 1.06, 0);
+          pose(leg, hip, ankle);
+          shoe.position.set(ankle.x, 0.113 + lift, ankle.z + 0.089);
+          sole.position.set(ankle.x, 0.035 + lift, ankle.z + 0.089);
+        }
+        const leftArm = rig.arms[0], rightArm = rig.arms[1];
+        elbow.set(-0.49, 1.68, 0.07);
+        wrist.set(-0.36, 1.43, 0.23);
+        pose(leftArm.upper, leftArm.shoulder, elbow);
+        pose(leftArm.forearm, elbow, wrist);
+        leftArm.elbow.position.copy(elbow);
+        leftArm.hand.position.set(wrist.x, wrist.y, wrist.z + 0.01);
 
-      const spraying = (first > 0 && first < 1) || (second > 0 && second < 1);
+        sprayOrigin.copy(mark).add(rig.can.sprayDistance);
+        rig.actor.worldToLocal(wrist.copy(sprayOrigin)).sub(rig.can.nozzleOffset);
+        wrist.lerp(restingWrist, 1 - reach);
+        elbow.set(0.38 + reach * 0.06, 1.68 + reach * (0.28 + (mark.y - 2.62) * 0.43), 0.12 + reach * 0.27);
+        pose(rightArm.upper, rightArm.shoulder, elbow);
+        pose(rightArm.forearm, elbow, wrist);
+        rightArm.elbow.position.copy(elbow);
+        rightArm.hand.position.copy(wrist);
+        rightArm.hand.position.x += 0.092;
+        rig.can.can.position.copy(wrist);
+        rig.actor.worldToLocal(gaze.copy(mark).lerp(cctv.position, ease(0.71, 0.81)));
+        gaze.sub(rig.head.position);
+        rig.head.rotation.y = Math.max(-0.54, Math.min(0.55, Math.atan2(gaze.x, gaze.z)));
+        rig.head.rotation.x = Math.max(-0.25, Math.min(0.25, -gaze.y * 0.31));
+      }
+
+      fightScene.visible = !vandalismActive;
+      const approach = ease(0.30, 0.48);
+      const impact = ease(0.45, 0.56);
+      const shove = impact * (1 - 0.7 * ease(0.58, 0.70));
+      const settle = ease(0.66, 0.72);
+      const recoil = ease(0.55, 0.69) * (1 - 0.18 * settle);
+      const brace = ease(0.45, 0.55) * (1 - 0.35 * settle);
+      for (const rig of fighters) {
+        if (vandalismActive) continue;
+        const side = rig.side;
+        rig.actor.position.x = side > 0
+          ? -1.45 + 0.74 * approach - 0.09 * recoil
+          : 1.45 - 0.74 * approach + 0.20 * recoil;
+        rig.actor.position.z = side > 0 ? 0.8 : 0.8 - 0.11 * recoil;
+        rig.actor.rotation.z = side > 0 ? -0.065 * impact * (1 - 0.45 * settle) : -0.10 * recoil;
+        for (const { side: legSide, leg, shoe, sole } of rig.legs) {
+          const retreatStep = side < 0 && legSide > 0 ? recoil * 0.14 : 0;
+          ankle.set(legSide * 0.27 + retreatStep, 0.15, legSide * 0.08 - (side < 0 ? recoil * 0.16 : 0));
+          hip.set(legSide * 0.20, 1.06, 0);
+          pose(leg, hip, ankle);
+          shoe.position.set(ankle.x, 0.113, ankle.z + 0.09);
+          sole.position.set(ankle.x, 0.035, ankle.z + 0.09);
+        }
+        for (const arm of rig.arms) {
+          if (side > 0 && arm.side > 0) {
+            elbow.set(0.43, 1.91, 0.32);
+            wrist.set(0.42, 1.75, 0.29 + shove * 0.56);
+          } else if (side < 0) {
+            elbow.set(arm.side * 0.37, 1.89, 0.29 + brace * 0.08);
+            wrist.set(arm.side * 0.15, 1.79, 0.43 + brace * 0.08);
+          } else {
+            elbow.set(-0.40, 1.83, 0.15);
+            wrist.set(-0.36, 1.58, 0.29);
+          }
+          pose(arm.upper, arm.shoulder, elbow);
+          pose(arm.forearm, elbow, wrist);
+          arm.elbow.position.copy(elbow);
+          arm.hand.position.set(wrist.x, wrist.y, wrist.z + 0.035);
+        }
+        rig.head.rotation.y = side < 0 ? -0.38 * brace : 0;
+      }
+
+      const spraying = vandalismActive && ((first > 0 && first < 1) || (second > 0 && second < 1));
       mist.forEach((particle, index) => {
         particle.visible = spraying;
         if (!spraying) return;
         const distance = ((progress * 87 + index * 0.163) % 1) * 0.82 + 0.09;
-        particle.position.copy(sprayOrigin).lerp(mark, distance);
+        particle.position.copy(mark).add(vandalists[character].can.sprayDistance).lerp(mark, distance);
         particle.position.x += Math.sin(index * 2.4) * distance * 0.062;
         particle.position.y += Math.cos(index * 2.4) * distance * 0.069;
       });
       bracket.opacity = ease(0.59, 0.72);
-      detection.visible = bracket.opacity > 0;
+      detection.visible = vandalismActive && bracket.opacity > 0;
+      for (const marker of fighterMarkers) marker.visible = !vandalismActive && bracket.opacity > 0;
       led.color.setHex(progress >= 0.67 ? 0xff655b : 0xa2df92);
       renderer.render(scene, camera);
     };

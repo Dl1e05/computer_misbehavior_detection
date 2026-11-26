@@ -1,3 +1,5 @@
+
+
 <!doctype html>
 <html lang="ru">
 <head>
@@ -6,10 +8,10 @@
   <meta name="theme-color" content="#090b10">
   <meta name="description" content="Демонстрационный сценарий Crimetor: от кадра камеры до уведомления об инциденте.">
   <title>Crimetor - сценарий фиксации инцидента</title>
+  <link rel="stylesheet" href="./transitions.css">
   <link rel="preconnect" href="https://cdnjs.cloudflare.com" crossorigin>
   <script defer src="https://cdnjs.cloudflare.com/ajax/libs/gsap/3.12.5/gsap.min.js"></script>
   <script defer src="https://cdnjs.cloudflare.com/ajax/libs/gsap/3.12.5/ScrollTrigger.min.js"></script>
-  <script defer src="./scene3d.js"></script>
   <style>
     :root {
       color-scheme: dark;
@@ -34,7 +36,7 @@
     }
     button { font: inherit; }
     a { color: inherit; }
-    button:focus-visible, a:focus-visible { outline: 2px solid var(--red); outline-offset: 4px; }
+    button:focus-visible, a:focus-visible, .closing-note h2:focus { outline: 2px solid var(--red); outline-offset: 4px; }
 
     .site-header {
       position: fixed;
@@ -49,6 +51,7 @@
       background: rgba(9, 11, 16, .84);
       backdrop-filter: blur(16px);
     }
+    .site-header[hidden], .scene-controls[hidden] { display: none; }
     .brand {
       display: inline-flex;
       align-items: center;
@@ -76,17 +79,50 @@
       letter-spacing: .15em;
     }
     .chapter-nav { display: flex; align-items: center; gap: clamp(10px, 2vw, 27px); }
-    .chapter-nav button {
-      padding: 8px 0;
-      border: 0;
+    .scenario-options { display: flex; align-items: center; gap: 5px; }
+    .scenario-options button {
+      min-height: 42px;
+      padding: 8px 12px;
+      border: 1px solid transparent;
       background: transparent;
       color: #b7bbc1;
       cursor: pointer;
-      font-size: 11px;
-      letter-spacing: .035em;
-      transition: color .2s ease;
+      font-size: 12px;
+      letter-spacing: .015em;
+      transition: background-color .2s ease, border-color .2s ease, color .2s ease;
     }
-    .chapter-nav button:hover { color: var(--paper); }
+    .scenario-options button:hover { color: var(--paper); }
+    .scenario-options button[aria-pressed="true"] {
+      border-color: rgba(239, 81, 72, .55);
+      background: rgba(239, 81, 72, .11);
+      color: var(--paper);
+    }
+    .scene-controls {
+      position: absolute;
+      z-index: 7;
+      top: 15px;
+      left: clamp(20px, 5vw, 76px);
+      display: flex;
+      align-items: center;
+      gap: 7px;
+      max-width: calc(100% - 40px);
+      padding: 6px;
+      border: 1px solid rgba(239, 238, 232, .16);
+      background: rgba(9, 11, 16, .88);
+      backdrop-filter: blur(14px);
+    }
+    .scene-controls .scenario-options button { min-height: 38px; padding: 7px 10px; font-size: 11px; }
+    .scenario-announcement, .visually-hidden {
+      position: absolute;
+      width: 1px;
+      height: 1px;
+      padding: 0;
+      margin: -1px;
+      overflow: hidden;
+      clip: rect(0, 0, 0, 0);
+      white-space: nowrap;
+      border: 0;
+    }
 
     .story-track { position: relative; height: 460svh; min-height: 2600px; }
     .scene-sticky { position: sticky; top: 0; height: 100svh; overflow: hidden; }
@@ -100,6 +136,7 @@
       pointer-events: none;
     }
     .scene-sticky::before { top: 78px; background: linear-gradient(180deg, rgba(9, 11, 16, .48), transparent); }
+    .site-header[hidden] + main .scene-sticky::before { top: 0; }
     .scene-sticky::after { bottom: 0; height: 46%; background: linear-gradient(0deg, rgba(9, 11, 16, .98) 2%, rgba(9, 11, 16, .79) 47%, transparent); }
     .visual-stage {
       position: absolute;
@@ -120,8 +157,6 @@
       pointer-events: none;
     }
     .classroom-art { display: block; width: 100%; height: 100%; }
-    .scene-3d { position: absolute; z-index: 1; inset: 0; width: 100%; height: 100%; opacity: 0; pointer-events: none; transition: opacity .5s ease; }
-    .scene-3d[data-ready="true"] { opacity: 1; }
     .phone-overlay {
       --phone-offset: 420px;
       position: absolute;
@@ -211,6 +246,7 @@
       font-size: 15px;
       line-height: 1.5;
     }
+    .chapter-card .alert-copy[hidden] { display: none; }
     .page-count {
       position: absolute;
       z-index: 4;
@@ -232,52 +268,44 @@
     }
     .progress-fill { width: 0%; height: 100%; background: var(--red); transform-origin: left; }
 
+    #classroom[data-scenario="fire"] [data-scenario-art="vandalism"],
+    #classroom[data-scenario="vandalism"] [data-scenario-art="fire"] { display: none; }
+    #classroom[data-scenario="vandalism"] [data-scenario-art="vandalism"],
+    #classroom[data-scenario="fire"] [data-scenario-art="fire"] { display: inline; }
+    #classroom[data-scenario="vandalism"] [data-scenario-copy="fire"],
+    #classroom[data-scenario="fire"] [data-scenario-copy="vandalism"] { display: none; }
     .closing-note { display: flex; align-items: center; gap: clamp(16px, 3vw, 40px); min-height: 112px; padding: 22px clamp(20px, 8.2vw, 132px); border-top: 1px solid var(--line); background: #0c0f14; }
     .closing-note h2, .closing-note p { margin: 0; }
     .closing-note p { max-width: 620px; line-height: 1.5; }
-    .pricing { padding: clamp(48px, 8vw, 100px) clamp(20px, 8.2vw, 132px); border-top: 1px solid var(--line); background: #0c0f14; font-size: 16px; line-height: 1.55; }
-    .pricing, .quote-form { scroll-margin-top: 94px; }
-    .pricing-heading { max-width: 720px; margin-bottom: 28px; }
-    .pricing h2 { margin: 0 0 12px; font: 400 clamp(34px, 5vw, 56px)/1.05 var(--serif); letter-spacing: -.04em; }
-    .pricing p { margin: 8px 0; color: #b5b8bd; }
-    .pricing .price-note { color: #e3ded5; }
-    .plan-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; }
-    .plan-card { display: flex; flex-direction: column; padding: 22px; border: 1px solid var(--line); background: #11151c; }
-    .plan-card h3 { margin: 0 0 10px; font-size: 17px; }
-    .plan-card .price { color: var(--paper); font-size: 25px; font-weight: 650; }
-    .plan-card ul { flex: 1; margin: 14px 0 20px; padding-left: 19px; color: #c3c6ca; font-size: 14px; }
-    .pricing button, .pricing input, .pricing select { min-height: 44px; border: 1px solid #454a52; border-radius: 0; background: #090b10; color: var(--paper); font: inherit; }
-    .pricing button { padding: 9px 14px; cursor: pointer; }
-    .pricing button:hover:not(:disabled) { border-color: var(--red); }
-    .pricing button:disabled { cursor: not-allowed; opacity: .55; }
-    .quote-form { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; margin-top: 28px; padding: 22px; border: 1px solid var(--line); }
-    .quote-heading { grid-column: 1 / -1; }
-    .quote-heading h3 { margin: 0; font-size: 20px; }
-    .quote-heading p { margin-bottom: 0; }
-    .quote-form label { display: grid; gap: 6px; color: #d2d0ca; font-size: 14px; }
-    .quote-form input, .quote-form select { width: 100%; padding: 8px 10px; }
-    .quote-total { align-self: end; color: var(--paper); font-weight: 650; }
-    .quote-form button { align-self: end; }
-    .chapter-nav a { color: #b7bbc1; font-size: 13px; text-decoration: none; }
+    .chapter-nav a { padding: 8px 0; color: #b7bbc1; font-size: 13px; text-decoration: none; }
     .chapter-nav a:hover { color: var(--paper); }
-    .footer-line { display: flex; justify-content: space-between; padding: 18px clamp(20px, 5vw, 76px); color: #707780; font-size: 9px; letter-spacing: .1em; }
+    .page-links { display: flex; align-items: center; gap: clamp(14px, 2vw, 26px); }
+    .footer-line { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 14px 22px; padding: 18px clamp(20px, 5vw, 76px); color: #707780; font-size: 9px; letter-spacing: .1em; }
+    .footer-links { display: flex; align-items: center; gap: 18px; color: #b7bbc1; font-size: 13px; letter-spacing: normal; }
+    .footer-links a { padding: 8px 0; color: inherit; text-decoration: none; }
+    .footer-links a:hover { color: var(--paper); }
 
     @keyframes rise-in { from { opacity: 0; transform: translateY(12px); } to { opacity: 1; transform: translateY(0); } }
 
     @media (max-width: 720px) {
-      .site-header { min-height: 94px; align-items: flex-start; flex-wrap: wrap; gap: 5px 12px; padding: 12px 18px 9px; }
+      .site-header { min-height: 124px; align-items: flex-start; flex-wrap: wrap; gap: 5px 12px; padding: 12px 18px 9px; }
       .brand { font-size: 12px; }
       .brand-mark { width: 25px; height: 25px; }
       .brand-note { display: none; }
-      .chapter-nav { width: 100%; justify-content: space-between; gap: 8px; }
-      .chapter-nav button, .chapter-nav a { padding: 4px 0; font-size: 11px; }
-      .plan-grid, .quote-form { grid-template-columns: 1fr; }
-      .pricing, .quote-form { scroll-margin-top: 110px; }
+      .chapter-nav { width: 100%; flex-direction: column; align-items: stretch; gap: 4px; }
+      .scenario-options { width: 100%; min-width: 0; gap: 3px; }
+      .chapter-nav .scenario-options button { flex: 1; min-width: 0; min-height: 40px; padding: 6px 5px; font-size: 10px; line-height: 1.2; }
+      .page-links { justify-content: flex-end; gap: 18px; }
+      .chapter-nav a { padding: 6px 0; font-size: 11px; white-space: nowrap; }
+      .scene-controls { top: 10px; left: 12px; width: calc(100% - 24px); max-width: none; justify-content: flex-start; flex-wrap: wrap; padding: 5px; }
+      .scene-controls .scenario-options { flex: 1 1 100%; min-width: 0; }
+      .scene-controls .scenario-options button { flex: 1; min-width: 0; padding: 7px 5px; font-size: 10px; }
       .scene-sticky { min-height: 0; }
-      .scene-sticky::before { top: 94px; }
+      .scene-sticky::before { top: 124px; }
       .visual-stage { top: 43%; width: min(100vw, 177.78svh); transform: translate(-50%, -50%); }
       .phone-overlay { top: 47%; left: 50%; width: min(212px, 57vw); transform: translate(-50%, calc(-50% + var(--phone-offset))); }
-      .scene-meta { top: 119px; right: 18px; font-size: 8px; }
+      .scene-meta { top: 145px; right: 18px; font-size: 8px; }
+      .site-header[hidden] + main .scene-meta { top: 74px; }
       .chapter-panel { bottom: 80px; left: 20px; width: calc(100% - 40px); min-height: 180px; }
       .chapter-card h1, .chapter-card h2 { max-width: 450px; font-size: clamp(38px, 10vw, 54px); }
       .chapter-card p { max-width: 400px; margin-top: 13px; font-size: 13px; }
@@ -285,7 +313,8 @@
       .scroll-cue { right: auto; bottom: 30px; left: 20px; font-size: 8px; }
       .page-count { right: 20px; bottom: 29px; }
       .closing-note { min-height: 92px; align-items: flex-start; flex-direction: column; padding-top: 17px; padding-bottom: 17px; }
-      .footer-line { gap: 14px; font-size: 8px; }
+      .footer-line { gap: 12px 16px; font-size: 8px; }
+      .footer-links { width: 100%; justify-content: flex-end; gap: 16px; font-size: 12px; }
     }
 
     @media (max-height: 700px) and (min-width: 721px) {
@@ -310,37 +339,55 @@
       .scene-sticky::before, .scene-sticky::after, .scroll-cue, .page-count, .progress-track { display: none; }
       .visual-stage { position: relative; top: auto; left: auto; width: min(100vw, 177.78svh); margin: 0 auto; transform: none; }
       .phone-overlay { position: relative; top: auto; left: auto; width: min(230px, 55vw); margin: 28px auto 0; opacity: 1; transform: none; }
-      .scene-meta { top: 82px; }
+      .scene-meta { top: 130px; }
       .chapter-panel { position: relative; bottom: auto; left: auto; width: min(760px, calc(100% - 40px)); min-height: 0; margin: 26px auto 0; }
       .chapter-card, .chapter-card.is-active { display: block; max-width: 720px; margin: 0 0 36px; animation: none; }
       .chapter-card h1, .chapter-card h2 { font-size: clamp(35px, 6vw, 60px); }
       .closing-note { min-height: 92px; }
+      .scene-controls { position: fixed; top: 10px; left: clamp(20px, 5vw, 76px); }
+    }
+
+    @media (prefers-reduced-motion: reduce) and (max-width: 720px) {
+      .scene-sticky { padding-top: 140px; }
+      .scene-controls { left: 12px; width: calc(100% - 24px); }
     }
   </style>
 </head>
 <body>
-  <header class="site-header">
+  <header class="site-header" data-scene-controls="header">
     <a class="brand" href="#story" aria-label="Crimetor, к началу сценария">
       <span class="brand-mark" aria-hidden="true">C</span>
       <span>CRIMETOR</span>
       <span class="brand-note">СЦЕНАРИЙ ДЕМО</span>
     </a>
-    <nav class="chapter-nav" aria-label="Переход по сценарию">
-      <button type="button" data-jump="0">Сцена</button>
-      <button type="button" data-jump="0.62">Инцидент</button>
-      <button type="button" data-jump="0.91">Уведомление</button>
-      <a href="#pricing">Тарифы</a>
-    </nav>
+    <div class="chapter-nav">
+      <div class="scenario-options" role="group" aria-label="Сценарий демонстрации">
+        <button type="button" data-scenario-option="vandalism" aria-pressed="true">Вандализм</button>
+        <button type="button" data-scenario-option="fire" aria-pressed="false">Пожар</button>
+      </div>
+      <nav class="page-links" aria-label="Страницы сайта">
+        <a href="./pricing.html">Тарифы</a>
+        <a href="./assistant.html">ИИ-помощник</a>
+      </nav>
+    </div>
   </header>
 
   <main>
     <section class="story-track" id="story" aria-label="Демонстрационный сценарий Crimetor">
       <div class="scene-sticky">
+        <div class="scene-controls" data-scene-controls="sticky" hidden>
+          <div class="scenario-options" role="group" aria-label="Сценарий демонстрации">
+            <button type="button" data-scenario-option="vandalism" aria-pressed="true">Вандализм</button>
+            <button type="button" data-scenario-option="fire" aria-pressed="false">Пожар</button>
+          </div>
+        </div>
+        <p class="scenario-announcement" id="scenario-announcement" aria-live="polite" aria-atomic="true"></p>
+        <p class="visually-hidden" id="alert-announcement" aria-live="polite" aria-atomic="true"></p>
         <div class="scene-meta"><span class="live-dot" aria-hidden="true"></span><span>Визуальный сценарий / аудитория 204</span></div>
         <div class="visual-stage">
-          <svg id="classroom" class="classroom-art" viewBox="210 115 340 191.25" preserveAspectRatio="xMidYMid meet" role="img" aria-labelledby="art-title art-description">
+          <svg id="classroom" class="classroom-art" viewBox="210 115 340 191.25" preserveAspectRatio="xMidYMid meet" role="img" aria-labelledby="art-title art-description" data-scenario="vandalism">
             <title id="art-title">Камера наблюдения в университетской аудитории</title>
-            <desc id="art-description">Прокрутка раскрывает аудиторию, человека с баллончиком у стены и демонстрационное уведомление на телефоне.</desc>
+            <desc id="art-description">Прокрутка раскрывает аудиторию, человека в худи с баллончиком у доски и демонстрационное уведомление на телефоне.</desc>
             <defs>
               <linearGradient id="wall" x2="0" y2="1">
                 <stop offset="0" stop-color="#1b2631" />
@@ -381,6 +428,9 @@
               <filter id="paint-glow" x="-60%" y="-60%" width="220%" height="220%">
                 <feGaussianBlur stdDeviation="8" result="blur" />
                 <feMerge><feMergeNode in="blur" /><feMergeNode in="SourceGraphic" /></feMerge>
+              </filter>
+              <filter id="fire-blur" x="-80%" y="-80%" width="260%" height="260%">
+                <feGaussianBlur stdDeviation="18" />
               </filter>
             </defs>
 
@@ -428,47 +478,101 @@
             <path d="M180 684H582M583 681H958M1004 689H1280" stroke="#93999a" stroke-opacity=".4" stroke-width="7" />
             <path d="M264 680H362M658 679H739M1072 685H1146" stroke="#e0dfd6" stroke-opacity=".11" stroke-width="2" />
 
-            <g id="graffiti" fill="none" stroke-linecap="round" stroke-linejoin="round">
-              <path id="paint-stroke" d="M1031 461C1064 409 1087 482 1120 432S1176 390 1192 455 1238 486 1261 418M1059 493C1103 472 1129 493 1150 470S1190 443 1228 488" stroke="#ef5148" stroke-width="13" stroke-dasharray="560" stroke-dashoffset="560" filter="url(#paint-glow)" />
-              <path id="paint-detail" d="M1092 409 1100 443M1162 456 1171 488M1221 411 1232 445" stroke="#ffb3a7" stroke-width="4" stroke-dasharray="70" stroke-dashoffset="70" />
-              <circle id="paint-mist" cx="1190" cy="430" r="44" fill="#ef5148" fill-opacity=".16" stroke="none" opacity="0" />
-            </g>
-
-            <g id="person" stroke-linecap="round" stroke-linejoin="round">
-              <path d="M1071 545 1050 656 1028 757M1110 547 1152 653 1160 757" fill="none" stroke="#10151a" stroke-width="25" />
-              <path d="M1023 757H1064M1144 757H1180" fill="none" stroke="#11151b" stroke-width="20" />
-              <path d="M1052 392C1070 374 1115 377 1132 403L1145 535C1114 557 1071 556 1041 536L1039 428Z" fill="#8e493e" stroke="#171c22" stroke-width="9" />
-              <path d="M1051 415 1018 486 1050 519" fill="none" stroke="#c08771" stroke-width="21" />
-              <g id="spray-arm">
-                <path d="M1120 411 1151 439 1182 418" fill="none" stroke="#c08771" stroke-width="19" />
-                <path d="M1182 418 1197 402" fill="none" stroke="#c08771" stroke-width="13" />
-                <g id="spray-can" transform="translate(1180 399) rotate(28)">
-                  <rect x="-5" y="-18" width="29" height="66" rx="7" fill="#242b32" stroke="#d7d9d2" stroke-opacity=".65" stroke-width="3" />
-                  <path d="M2-18V-27H18V-18" fill="#adb6b1" />
-                  <path d="M0 5H20" stroke="#ef5148" stroke-width="12" />
-                  <path d="M8-29H17" stroke="#ecebe4" stroke-width="4" />
-                </g>
-                <g id="paint-spray" opacity="0" fill="#ffc0b5">
-                  <circle cx="1209" cy="401" r="3" />
-                  <circle cx="1218" cy="396" r="2" />
-                  <circle cx="1224" cy="405" r="2.5" />
-                  <circle cx="1233" cy="397" r="1.8" />
-                  <path d="M1204 409 1242 390" fill="none" stroke="#ff8a77" stroke-opacity=".72" stroke-width="3" />
-                </g>
+            <g id="vandalism-scene" data-scenario-art="vandalism">
+              <g id="graffiti" fill="none" stroke-linecap="round" stroke-linejoin="round">
+                <path id="paint-stroke" d="M683 414C704 378 724 446 749 407S791 363 804 419 836 448 851 393 878 378 894 421C876 466 846 462 829 445S785 426 766 448 724 474 700 455" stroke="#ef5148" stroke-width="13" stroke-dasharray="560" stroke-dashoffset="560" filter="url(#paint-glow)" />
+                <path id="paint-detail" d="M730 387 739 415M791 426 800 454M837 392 848 420" stroke="#ffb3a7" stroke-width="4" stroke-dasharray="70" stroke-dashoffset="70" />
+                <circle id="paint-mist" cx="683" cy="414" r="24" fill="#ef5148" fill-opacity=".16" stroke="none" opacity="0" />
               </g>
-              <path d="M1094 375V393" stroke="#a56e5c" stroke-width="18" />
-              <ellipse cx="1088" cy="348" rx="35" ry="41" fill="#b77b64" stroke="#171c22" stroke-width="7" />
-              <path d="M1054 349C1056 315 1086 297 1117 320L1127 350 1112 342 1098 327 1076 345 1054 358Z" fill="#20232a" />
-              <path d="M1070 354H1080M1099 352H1107" stroke="#1c2025" stroke-width="4" />
-              <path d="M1088 369 1102 370" stroke="#71483f" stroke-width="3" />
-              <path d="M1194 391 1221 380" stroke="#ff8a77" stroke-opacity=".7" stroke-width="4" />
-              <path d="M1016 488 1045 512" stroke="#e2e1d8" stroke-opacity=".35" stroke-width="3" />
+
+              <g id="person" transform="translate(420 380)" stroke-linecap="round" stroke-linejoin="round">
+                <!-- Humaaans by Pablo Stanley, CC0; adapted from ozgrozer/hdt/docs/objects at e9058e3a6a2f0e582d0ca8fbe3bae8e4ce3bf7e1. -->
+                <g id="person-legs" transform="translate(20 114)">
+                  <g transform="translate(-72 0)">
+                    <polygon fill="#191847" points="128 0 164.254962 127.226909 190.706957 221 210 221 181.890974 0"></polygon>
+                    <path d="M118.304342 0C117.465768 65.5742244 114.606247 101.340188 113.725779 107.297892 112.845311 113.255595 99.5321718 151.156298 73.7863613 221H93.7726468C126.549033 153.996902 144.845651 116.096199 148.662499 107.297892 152.479348 98.4995844 164.258515 62.7336205 182 0Z" fill="#2F3676"></path>
+                    <g transform="translate(72 199)" fill="#191847">
+                      <path d="M0 40 1 19H22C31.9576033 26 44.9576033 31.6666667 61 36V40H23L10 38V40Z"></path>
+                    </g>
+                    <g transform="translate(188 199)" fill="#191847">
+                      <path d="M0 40 1 19H22C31.9576033 26 44.9576033 31.6666667 61 36V40H23L10 38V40Z"></path>
+                    </g>
+                  </g>
+                </g>
+                <g id="person-body" transform="translate(-34 4)">
+                  <path d="M68.3079281 93.0198914 89.2053198 93.1020711C76.3021447 134.755739 69.3363474 156.856914 68.3079281 159.405597 65.9939846 165.140133 70.8906002 173.873732 72.9845874 178.567103 66.1645409 181.61887 66.8912241 170.316929 58.2879189 174.319492 50.4352209 177.972846 44.4616931 184.59248 35.3890352 178.994371 34.2736052 178.306117 33.0512757 175.714714 36.0045784 173.68967 43.3623323 168.644547 53.9653015 159.814672 55.3979297 156.908251 57.3515741 152.944826 61.6549068 131.648706 68.3079281 93.0198914Z" fill="#B28B67"></path>
+                  <g id="spray-arm">
+                    <path d="M122.731734 9.58031077 131.216685 7.34914009C165.5935 32.1628362 183.361709 84.0563407 224.996623 108.72736L216.58973 121.240539C147.889238 118.771641 125.383314 55.5469019 122.731734 9.58031077Z" fill="#46529D" transform="translate(173.864178 64.29484) rotate(5) translate(-173.864178 -64.29484)"></path>
+                    <path d="M190.781205 92.2114854 222.679476 115.635084C231.330944 117.969562 238.558965 120.874047 244.363541 124.34854 245.734683 125.597945 247.391836 128.128197 241.70538 127.690906 236.018925 127.253615 230.01796 127.049392 229.233339 128.988954 228.448719 130.928516 231.889854 133.24802 230.303794 135.864997 229.246421 137.609648 224.250967 133.234999 215.31743 122.74105L183.729774 109.642447Z" fill="#B28B67"></path>
+                    <g id="spray-can" transform="translate(225 123) rotate(28)">
+                      <rect x="-5" y="-18" width="29" height="66" rx="7" fill="#242B32" stroke="#D7D9D2" stroke-opacity=".65" stroke-width="3"></rect>
+                      <path d="M2-18V-27H18V-18Z" fill="#ADB6B1"></path>
+                      <path d="M0 5H20" stroke="#EF5148" stroke-width="12"></path>
+                      <path d="M8-29H17" stroke="#ECEBE4" stroke-width="4"></path>
+                    </g>
+                    <g id="paint-spray" transform="translate(225 123) rotate(28)" opacity="0" fill="#FFC0B5">
+                      <circle cx="13" cy="-27" r="3"></circle>
+                      <circle cx="20" cy="-20" r="2"></circle>
+                      <circle cx="27" cy="-12" r="2.5"></circle>
+                      <circle cx="34" cy="-4" r="1.8"></circle>
+                      <path d="M13-27 35-3" fill="none" stroke="#FF8A77" stroke-opacity=".72" stroke-width="3"></path>
+                    </g>
+                  </g>
+                  <path d="M90 114C124.671756 114 150.175573 114 166.511451 114 170.007634 114 169.348845 108.951637 168.84345 106.404206 163.010588 77.0037663 140.241304 45.3115155 140.241304 3.4607303L118.1718 0C99.917485 29.3584068 93.6048263 65.5045499 90 114Z" fill="#DDE3E9"></path>
+                  <path d="M90.6148413 28.8579585C87.4095228 27.9365884 84.8712423 25.7876656 83 22.4111902 74.933557 7.85607578 77.8467271-.157592785 86.4671964-2.7917309 95.0876658-5.42586901 102.775319 0 116.510031 0 117.257085 0 117.941303 .046832534 118.562683 .140497603L125.471587 .534739944C145.293986 67.7151944 150.760885 112.536948 141.872285 135H81.6518141C78.0838152 143.319871 74.6695413 150.319871 71.4089926 156H55C53.4556832 106.067091 65.327297 63.6864104 90.6148413 28.8579585Z" fill="#6474CA"></path>
+                  <path d="M94.7652287 100.497634C96.6591508 116.344024 99.7374079 127.844812 104 135H81.6518141C85.813785 125.295103 90.1849231 113.794314 94.7652283 100.497633Z" fill="#000" fill-opacity=".1"></path>
+                </g>
+                <svg id="person-head" x="74" y="-65" width="42.3" height="69.3" viewBox="0 0 47 77" overflow="hidden">
+                  <g transform="translate(-53 -27)">
+                    <g transform="translate(54 31)" fill="#B28B67">
+                      <path d="M8.26227388 34.4901268C3.65436435 29.0813759 .535634794 22.4528771 1.05677633 15.0254539 2.55833022-6.37502057 32.3485306-1.66718886 38.1433414 9.13393292 43.9381521 19.9350547 43.249578 47.3329958 35.7603014 49.2634576 32.7735882 50.033323 26.4110012 48.1474609 19.935372 44.244306L24 73H0Z"></path>
+                    </g>
+                    <path d="M81.5586899 41.7004095C78.3018196 43.5222215 75.9840093 46.9359598 73.1939275 51.4137701 72.5143905 51.14668 71.7743247 51 71 51 67.6862915 51 65 53.6862915 65 57 65 58.6822183 65.6922919 60.2027431 66.807515 61.292214 65.4191964 63.2518162 63.8632894 65.2988831 62.0803863 67.4111902 55.4270381 63.419452 50.4784394 51.7854049 56.8311103 40.554248 62.2968954 18.0574265 93.2683534 32.0209586 99.2270045 28.2267775 100.529452 36.3904854 96.3284471 42.9730591 81.5586899 41.7004095Z" fill="#191847"></path>
+                  </g>
+                </svg>
+              </g>
+
+              <g id="detection" opacity="0" fill="none" stroke="#ef5148" stroke-width="4">
+                <path d="M394 354V326H420M881 326H907V354M907 508V536H881M420 536H394V508" />
+                <path d="M394 431H406M895 431H907" stroke-opacity=".72" />
+                <circle cx="394" cy="431" r="5" fill="#ef5148" stroke="none" />
+              </g>
             </g>
 
-            <g id="detection" opacity="0" fill="none" stroke="#ef5148" stroke-width="4">
-              <path d="M1006 354V328H1032M1253 328H1279V354M1279 529V555H1253M1032 555H1006V529" />
-              <path d="M1006 441H1018M1267 441H1279" stroke-opacity=".72" />
-              <circle cx="1006" cy="441" r="5" fill="#ef5148" stroke="none" />
+            <g id="fire-scene" data-scenario-art="fire">
+              <ellipse cx="1152" cy="700" rx="156" ry="20" fill="#0b0f13" fill-opacity=".62" />
+              <g id="fire-smoke-near" opacity="0">
+                <path d="M1103 552Q1088 538 1104 522 1094 502 1116 488 1114 468 1134 461 1144 442 1163 451 1182 438 1192 459 1215 459 1213 480 1232 495 1214 513 1222 533 1200 543 1172 559 1145 545Z" fill="#8e9da0" fill-opacity=".68" />
+                <path d="M1115 535Q1108 519 1121 508M1146 528Q1135 506 1150 492M1185 530Q1202 512 1190 497" fill="none" stroke="#c6cdca" stroke-opacity=".28" stroke-width="7" />
+              </g>
+              <g id="fire-smoke-mid" opacity="0">
+                <path d="M1118 474Q1100 459 1118 439 1104 419 1126 406 1128 386 1150 383 1162 363 1183 375 1204 365 1213 389 1235 396 1225 418 1245 435 1225 453 1229 471 1208 480 1177 493 1152 474Z" fill="#9ca8a8" fill-opacity=".58" />
+                <path d="M1132 459Q1123 442 1140 425M1172 461Q1159 435 1174 413M1203 449Q1216 430 1204 414" fill="none" stroke="#d4d8d3" stroke-opacity=".24" stroke-width="8" />
+              </g>
+              <g id="fire-smoke-high" opacity="0">
+                <path d="M1131 407Q1112 392 1130 372 1118 351 1141 340 1144 321 1167 319 1179 300 1200 313 1221 304 1230 328 1252 335 1243 358 1261 374 1241 390 1245 407 1222 416 1192 428 1167 409Z" fill="#aeb7b4" fill-opacity=".48" />
+                <path d="M1148 389Q1137 373 1155 355M1185 393Q1171 369 1189 345M1218 383Q1230 366 1217 350" fill="none" stroke="#e0e0d8" stroke-opacity=".2" stroke-width="8" />
+              </g>
+              <g id="fire-cabinet">
+                <path d="M1052 582 1074 553H1262L1244 582Z" fill="#75553c" stroke="#20252a" stroke-width="8" />
+                <path d="M1052 582H1244V689H1052Z" fill="#684c39" stroke="#20252a" stroke-width="8" />
+                <path d="M1068 595H1142V674H1068ZM1154 595H1228V674H1154Z" fill="#816044" stroke="#b08a5d" stroke-opacity=".62" stroke-width="4" />
+                <path d="M1131 628V645M1217 628V645" stroke="#e0bd82" stroke-width="5" stroke-linecap="round" />
+                <path d="M1050 687H1247" stroke="#bd9870" stroke-opacity=".65" stroke-width="6" />
+              </g>
+              <ellipse id="fire-glow" cx="1153" cy="579" rx="116" ry="54" fill="#ff672f" fill-opacity=".5" filter="url(#fire-blur)" opacity="0" />
+              <g id="fire-flames" opacity="0" stroke-linejoin="round">
+                <path d="M1068 582Q1048 561 1072 540 1082 523 1080 505 1106 522 1111 548 1127 527 1124 500 1150 517 1150 545 1171 522 1172 490 1195 510 1194 537 1211 523 1225 507 1224 543 1240 563 1221 583Z" fill="#e95c35" stroke="#a93c29" stroke-width="5" />
+                <path d="M1090 581Q1084 565 1098 549 1105 536 1104 526 1120 541 1117 562 1133 547 1134 528 1151 546 1146 565 1162 551 1167 536 1180 553 1173 569 1190 556 1200 545 1202 565 1212 579Z" fill="#ffb84f" />
+                <path d="M1120 579Q1118 569 1127 561 1135 554 1136 544 1149 556 1144 571 1158 562 1160 551 1170 568 1163 579Z" fill="#fff0a1" />
+              </g>
+              <g id="fire-detection" opacity="0" fill="none" stroke="#ef5148" stroke-width="4">
+                <path d="M1022 309V283H1048M1252 283H1278V309M1278 673V699H1252M1048 699H1022V673" />
+                <path d="M1022 510H1037M1263 510H1278" stroke-opacity=".72" />
+                <circle cx="1022" cy="510" r="5" fill="#ef5148" stroke="none" />
+                <rect x="1046" y="289" width="126" height="27" fill="#10161b" stroke="#ef5148" stroke-width="2" />
+                <text x="1057" y="308" fill="#fff" stroke="none" font-family="Arial, sans-serif" font-size="14" font-weight="700" letter-spacing="1">ПОЖАР / 204</text>
+              </g>
             </g>
 
             <g id="camera" transform="translate(255 155) rotate(20 90 42)" filter="url(#soft-shadow)">
@@ -487,37 +591,41 @@
             </g>
 
             <defs>
-            <g id="phone-device">
-              <g transform="translate(1171 237) rotate(-5 164 280)" filter="url(#soft-shadow)">
-                <rect x="0" y="0" width="328" height="570" rx="42" fill="#05070a" stroke="#717980" stroke-width="4" />
-                <rect x="11" y="11" width="306" height="548" rx="34" fill="url(#phone-screen)" />
-                <rect x="111" y="16" width="106" height="17" rx="9" fill="#05070a" />
-                <text x="29" y="65" fill="#f1f1ec" font-family="Arial, sans-serif" font-size="13" font-weight="700">9:41</text>
-                <text x="284" y="65" fill="#d7dad6" font-family="Arial, sans-serif" font-size="12" text-anchor="end">LTE  92%</text>
-                <path d="M27 89H301" stroke="#f2f2eb" stroke-opacity=".1" />
-                <text x="29" y="131" fill="#a4aab1" font-family="Arial, sans-serif" font-size="12" letter-spacing="1.2">ДЕМО / УВЕДОМЛЕНИЕ</text>
-                <rect x="25" y="153" width="278" height="214" rx="19" fill="#202833" stroke="#f2f2eb" stroke-opacity=".12" />
-                <rect x="43" y="171" width="28" height="28" rx="8" fill="#ef5148" />
-                <text x="57" y="190" fill="#fff" font-family="Arial, sans-serif" font-size="14" font-weight="700" text-anchor="middle">C</text>
-                <text x="81" y="184" fill="#f4f4ef" font-family="Arial, sans-serif" font-size="14" font-weight="700">Crimetor</text>
-                <text x="277" y="184" fill="#9da4ac" font-family="Arial, sans-serif" font-size="11" text-anchor="end">сейчас</text>
-                <text x="44" y="236" fill="#fff" font-family="Arial, sans-serif" font-size="28" font-weight="700">
-                  <tspan x="44" dy="0">Кабинет 204.</tspan>
-                  <tspan x="44" dy="31">Обнаружен акт</tspan>
-                  <tspan x="44" dy="31">вандализма</tspan>
-                </text>
-                <text x="44" y="333" fill="#acb2ba" font-family="Arial, sans-serif" font-size="12">Демонстрационный сценарий</text>
-                <path d="M24 397H304" stroke="#fff" stroke-opacity=".1" />
-                <circle cx="164" cy="531" r="17" fill="none" stroke="#737b83" stroke-width="3" />
-                <rect x="119" y="546" width="90" height="5" rx="3" fill="#e8e8e3" />
+              <g id="phone-device">
+                <g transform="translate(1171 237) rotate(-5 164 280)" filter="url(#soft-shadow)">
+                  <rect x="0" y="0" width="328" height="570" rx="42" fill="#05070a" stroke="#717980" stroke-width="4" />
+                  <rect x="11" y="11" width="306" height="548" rx="34" fill="url(#phone-screen)" />
+                  <rect x="111" y="16" width="106" height="17" rx="9" fill="#05070a" />
+                  <text x="29" y="65" fill="#f1f1ec" font-family="Arial, sans-serif" font-size="13" font-weight="700">9:41</text>
+                  <text x="284" y="65" fill="#d7dad6" font-family="Arial, sans-serif" font-size="12" text-anchor="end">LTE  92%</text>
+                  <path d="M27 89H301" stroke="#f2f2eb" stroke-opacity=".1" />
+                  <text x="29" y="131" fill="#a4aab1" font-family="Arial, sans-serif" font-size="12" letter-spacing="1.2">ДЕМО / УВЕДОМЛЕНИЕ</text>
+                  <rect x="25" y="153" width="278" height="214" rx="19" fill="#202833" stroke="#f2f2eb" stroke-opacity=".12" />
+                  <rect x="43" y="171" width="28" height="28" rx="8" fill="#ef5148" />
+                  <text x="57" y="190" fill="#fff" font-family="Arial, sans-serif" font-size="14" font-weight="700" text-anchor="middle">C</text>
+                  <text x="81" y="184" fill="#f4f4ef" font-family="Arial, sans-serif" font-size="14" font-weight="700">Crimetor</text>
+                  <text x="277" y="184" fill="#9da4ac" font-family="Arial, sans-serif" font-size="11" text-anchor="end">сейчас</text>
+                  <text data-scenario-copy="vandalism" x="44" y="236" fill="#fff" font-family="Arial, sans-serif" font-size="28" font-weight="700">
+                    <tspan x="44" dy="0">Кабинет 204.</tspan>
+                    <tspan x="44" dy="31">Обнаружен акт</tspan>
+                    <tspan x="44" dy="31">вандализма</tspan>
+                  </text>
+                  <text data-scenario-copy="fire" x="44" y="236" fill="#fff" font-family="Arial, sans-serif" font-size="28" font-weight="700" aria-label="Кабинет 204. Обнаружен пожар">
+                    <tspan x="44" dy="0">Кабинет 204.</tspan>
+                    <tspan x="44" dy="31">Обнаружен</tspan>
+                    <tspan x="44" dy="31">пожар</tspan>
+                  </text>
+                  <text x="44" y="333" fill="#acb2ba" font-family="Arial, sans-serif" font-size="12">Демонстрационный сценарий</text>
+                  <path d="M24 397H304" stroke="#fff" stroke-opacity=".1" />
+                  <circle cx="164" cy="531" r="17" fill="none" stroke="#737b83" stroke-width="3" />
+                  <rect x="119" y="546" width="90" height="5" rx="3" fill="#e8e8e3" />
+                </g>
               </g>
-            </g>
             </defs>
           </svg>
-          <div class="scene-3d" data-crimetor-scene3d aria-hidden="true"></div>
         </div>
 
-        <div class="chapter-panel" aria-live="polite" aria-atomic="true">
+        <div class="chapter-panel" aria-live="off">
           <article class="chapter-card is-active" data-chapter="0">
             <div class="chapter-kicker">01 / Наблюдение</div>
             <h1>Сначала - только камера.</h1>
@@ -526,18 +634,21 @@
           <article class="chapter-card" data-chapter="1" aria-hidden="true">
             <div class="chapter-kicker">02 / Контекст</div>
             <h2>В кадре появляется аудитория.</h2>
-            <p>Камера направлена на стену. Человек наносит на нее краску из баллончика.</p>
+            <p data-scenario-copy="vandalism">Камера направлена на доску. Человек наносит на нее краску из баллончика.</p>
+            <p data-scenario-copy="fire" hidden>У шкафа в аудитории 204 видны пламя и поднимающийся дым.</p>
           </article>
           <article class="chapter-card" data-chapter="2" aria-hidden="true">
             <div class="chapter-kicker">03 / Фиксация</div>
-            <h2>Область действия выделена.</h2>
-            <p>Подсветка и штрихи показывают ход демонстрационной сцены.</p>
+            <h2>Область события выделена.</h2>
+            <p data-scenario-copy="vandalism">Подсветка и штрихи показывают ход демонстрационной сцены.</p>
+            <p data-scenario-copy="fire" hidden>Рамка выделяет шкаф, пламя и столб дыма.</p>
           </article>
           <article class="chapter-card" data-chapter="3" aria-hidden="true">
             <div class="chapter-kicker">04 / Уведомление</div>
             <h2>Сообщение на телефоне.</h2>
             <p>Пример уведомления завершает сценарий.</p>
-            <p class="alert-copy">Кабинет 204. Обнаружен акт вандализма</p>
+            <p class="alert-copy" data-scenario-copy="vandalism">Кабинет 204. Обнаружен акт вандализма</p>
+            <p class="alert-copy" data-scenario-copy="fire" hidden>Кабинет 204. Обнаружен пожар</p>
           </article>
         </div>
         <div id="phone-reveal" class="phone-overlay" aria-hidden="true"><svg class="phone-art" viewBox="1148 218 380 610"><use href="#phone-device" /></svg></div>
@@ -550,57 +661,65 @@
     <section class="closing-note" aria-labelledby="demo-title">
       <div>
         <div class="closing-label">Примечание</div>
-        <h2 id="demo-title">Демо-сценарий</h2>
+        <h2 id="demo-title" tabindex="-1">Демо-сценарий</h2>
       </div>
       <p>Иллюстрация и сообщение на телефоне - часть условной сцены. Реальное видеонаблюдение, распознавание событий и отправка уведомлений здесь не подключены.</p>
     </section>
-    <section class="pricing" id="pricing" aria-labelledby="pricing-title">
-      <div class="pricing-heading">
-        <h2 id="pricing-title">Тарифы</h2>
-        <p class="price-note">Предварительные тарифы. Условия для обсуждения.</p>
-        <p>Стоимость фиксированная за выбранный план при соблюдении лимита камер.</p>
-      </div>
-      <div class="plan-grid">
-        <article class="plan-card"><h3>Start</h3><p class="price">29 900 ₸ <small>/ месяц</small></p><p>Годом авансом: 304 980 ₸ (-15%)</p><ul><li>До 4 камер, 1 здание, 3 пользователя</li><li>Метаданные инцидентов за 7 дней</li><li>Оповещения о подозрении на вандализм</li></ul><button type="button" data-select-plan="start">Выбрать Start</button></article>
-        <article class="plan-card"><h3>Campus</h3><p class="price">99 900 ₸ <small>/ месяц</small></p><p>Годом авансом: 1 018 980 ₸ (-15%)</p><ul><li>До 16 камер, 3 здания, 10 пользователей</li><li>Метаданные инцидентов за 30 дней</li><li>Оповещения о подозрении на вандализм</li></ul><button type="button" data-select-plan="campus">Выбрать Campus</button></article>
-        <article class="plan-card"><h3>Network</h3><p class="price">249 900 ₸ <small>/ месяц</small></p><p>Годом авансом: 2 548 980 ₸ (-15%)</p><ul><li>До 48 камер, 10 зданий, 30 пользователей</li><li>Метаданные инцидентов за 90 дней</li><li>Оповещения о подозрении на вандализм</li></ul><button type="button" data-select-plan="network">Выбрать Network</button></article>
-      </div>
-      <p>Оборудование, подключение и настройка, а также архив видеозаписей рассчитываются отдельно.</p>
-      <form class="quote-form" id="quote-form" aria-labelledby="quote-title">
-        <div class="quote-heading">
-          <h3 id="quote-title">Черновик заявки</h3>
-          <p>Подготовьте запрос коммерческого предложения или счета и скачайте его на свое устройство.</p>
-        </div>
-        <label>Тариф<select name="plan" id="quote-plan"><option value="start">Start</option><option value="campus">Campus</option><option value="network">Network</option></select></label>
-        <label>Оплата<select name="period" id="quote-period"><option value="month">За месяц</option><option value="year">Годовая предоплата (-15%)</option></select></label>
-        <label>Количество камер<input name="cameras" id="quote-cameras" type="number" min="1" max="4" step="1" value="1" required></label>
-        <label>Организация<input name="organization" type="text" maxlength="120" autocomplete="organization" pattern=".*\S.*" title="Введите название организации" required></label>
-        <label>Рабочая почта<input name="email" type="email" maxlength="254" autocomplete="email" required></label>
-        <label>Запрос<select name="intent"><option>Запрос предложения</option><option>Запрос счета на оплату</option></select></label>
-        <output class="quote-total" id="quote-total" aria-live="polite">Итого: -</output>
-        <button id="quote-submit" type="submit" disabled>Скачать черновик</button>
-      </form>
-    </section>
-    <footer class="footer-line"><span>CRIMETOR / DEMO</span><span>Университетская аудитория / 204</span></footer>
+    <footer class="footer-line">
+      <span>CRIMETOR / DEMO</span>
+      <span>Университетская аудитория / 204</span>
+      <nav class="footer-links" aria-label="Страницы сайта">
+        <a href="./pricing.html">Тарифы</a>
+        <a href="./assistant.html">ИИ-помощник</a>
+      </nav>
+    </footer>
   </main>
 
   <script>
     (() => {
       const track = document.querySelector(".story-track");
+      const sceneSticky = track.querySelector(".scene-sticky");
+      const headerControls = document.querySelector('[data-scene-controls="header"]');
+      const stickyControls = document.querySelector('[data-scene-controls="sticky"]');
       const art = document.getElementById("classroom");
+      const artDescription = document.getElementById("art-description");
       const field = document.getElementById("camera-field");
       const paint = document.getElementById("paint-stroke");
       const paintDetail = document.getElementById("paint-detail");
       const paintMist = document.getElementById("paint-mist");
+      const paintLength = paint.getTotalLength();
+      const paintDetailLength = paintDetail.getTotalLength();
+      paint.setAttribute("stroke-dasharray", String(paintLength));
+      paint.setAttribute("stroke-dashoffset", String(paintLength));
+      paintDetail.setAttribute("stroke-dasharray", String(paintDetailLength));
+      paintDetail.setAttribute("stroke-dashoffset", String(paintDetailLength));
+      const paintSpray = document.getElementById("paint-spray");
       const sprayArm = document.getElementById("spray-arm");
       const detection = document.getElementById("detection");
+      const fireDetection = document.getElementById("fire-detection");
+      const fireGlow = document.getElementById("fire-glow");
+      const fireFlames = document.getElementById("fire-flames");
+      const fireSmoke = [
+        document.getElementById("fire-smoke-near"),
+        document.getElementById("fire-smoke-mid"),
+        document.getElementById("fire-smoke-high")
+      ];
       const phone = document.getElementById("phone-reveal");
       const cards = Array.from(document.querySelectorAll(".chapter-card"));
+      const scenarioCopies = Array.from(document.querySelectorAll("[data-scenario-copy]"));
+      const scenarioAnnouncement = document.getElementById("scenario-announcement");
+      const alertAnnouncement = document.getElementById("alert-announcement");
+      let alertAnnouncementFrame = 0;
+      let initializing = true;
       const fill = document.getElementById("progress-fill");
       const progressTrack = document.querySelector(".progress-track");
       const chapterNumber = document.getElementById("chapter-number");
       const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)");
-      const state = { progress: 0 };
+      const mobileViewport = window.matchMedia("(max-width: 720px)");
+      const state = {
+        progress: 0,
+        scenario: art.dataset.scenario === "fire" ? "fire" : "vandalism"
+      };
 
       const clamp = (value, min, max) => Math.min(max, Math.max(min, value));
       const smooth = (start, end, value) => {
@@ -613,27 +732,141 @@
         return clamp(-track.getBoundingClientRect().top / span, 0, 1);
       };
 
+      function updateArtDescription() {
+        if (state.scenario === "fire") {
+          artDescription.textContent = "Прокрутка раскрывает аудиторию 204, шкаф с пламенем и постепенно поднимающимся дымом, рамку обнаружения и уведомление на телефоне.";
+          return;
+        }
+        artDescription.textContent = "Прокрутка раскрывает аудиторию, человека в худи с баллончиком у доски и демонстрационное уведомление на телефоне.";
+      }
+
+      function updateScenarioCopy() {
+        scenarioCopies.forEach((copy) => {
+          const visible = copy.dataset.scenarioCopy === state.scenario;
+          if (copy.namespaceURI === "http://www.w3.org/2000/svg") {
+            copy.style.display = visible ? "" : "none";
+          } else {
+            copy.hidden = !visible;
+          }
+        });
+      }
+
+      function announceAlert() {
+        clearAlertAnnouncement();
+        alertAnnouncementFrame = window.requestAnimationFrame(() => {
+          alertAnnouncementFrame = 0;
+          const copy = document.querySelector(`.alert-copy[data-scenario-copy="${state.scenario}"]`);
+          if (!copy) return;
+          alertAnnouncement.textContent = copy.textContent.trim();
+        });
+      }
+
+      function clearAlertAnnouncement() {
+        if (alertAnnouncementFrame) window.cancelAnimationFrame(alertAnnouncementFrame);
+        alertAnnouncementFrame = 0;
+        alertAnnouncement.textContent = "";
+      }
+
+      function updateSelectionControls() {
+        document.querySelectorAll("[data-scenario-option]").forEach((button) => {
+          button.setAttribute("aria-pressed", String(button.dataset.scenarioOption === state.scenario));
+        });
+        art.dataset.scenario = state.scenario;
+        updateScenarioCopy();
+        updateArtDescription();
+      }
+
+      function updateControlSurfaces() {
+        const atTop = window.scrollY <= 0;
+        const bounds = track.getBoundingClientRect();
+        const sceneBounds = sceneSticky.getBoundingClientRect();
+        const storyVisible = bounds.bottom > 0 && bounds.top < window.innerHeight
+          && (reducedMotion.matches || sceneBounds.top >= -1);
+        const activeElement = document.activeElement;
+        const focusedSurface = headerControls.contains(activeElement)
+          ? headerControls
+          : stickyControls.contains(activeElement) ? stickyControls : null;
+        const visibleSurface = atTop ? headerControls : storyVisible ? stickyControls : null;
+
+        if (focusedSurface && visibleSurface && focusedSurface !== visibleSurface) {
+          const focusedOption = activeElement.closest("[data-scenario-option]");
+          const value = focusedOption?.dataset.scenarioOption || state.scenario;
+          visibleSurface.hidden = false;
+          visibleSurface.inert = false;
+          const replacement = Array.from(visibleSurface.querySelectorAll("[data-scenario-option]")).find((button) => button.dataset.scenarioOption === value);
+          replacement?.focus({ preventScroll: true });
+        } else if (focusedSurface && !visibleSurface) {
+          document.getElementById("demo-title").focus({ preventScroll: true });
+        }
+
+        const showHeader = atTop;
+        const showSticky = !atTop && storyVisible;
+        headerControls.hidden = !showHeader;
+        headerControls.inert = !showHeader;
+        stickyControls.hidden = !showSticky;
+        stickyControls.inert = !showSticky;
+      }
+
+      function selectScenario(scenario) {
+        if (scenario !== "vandalism" && scenario !== "fire") return;
+        if (state.scenario === scenario) return;
+        state.scenario = scenario;
+        updateSelectionControls();
+        scenarioAnnouncement.textContent = scenario === "fire"
+          ? "Выбран сценарий: пожар в аудитории 204."
+          : "Выбран сценарий: вандализм.";
+        render(state.progress);
+        if (state.progress >= .8) announceAlert();
+      }
+
       function render(progress) {
         const p = clamp(progress, 0, 1);
+        const previousProgress = state.progress;
         state.progress = p;
-        window.CrimetorSceneProgress = p;
-        window.CrimetorScene3D?.setProgress(p);
+        if (!reducedMotion.matches) {
+          if (p < .8 && previousProgress >= .8) {
+            clearAlertAnnouncement();
+          } else if (p >= .8 && previousProgress < .8 && !initializing) {
+            announceAlert();
+          }
+        }
 
         const zoom = smooth(0, .43, p);
-        const x = 210 * (1 - zoom);
-        const y = 115 * (1 - zoom);
-        const width = 340 + 1260 * zoom;
+        const revealFrame = mobileViewport.matches
+          ? state.scenario === "fire"
+            ? { x: 610, y: 180, width: 980 }
+            : { x: 250, y: 205, width: 980 }
+          : { x: 0, y: 0, width: 1600 };
+        const incidentFrame = mobileViewport.matches ? revealFrame : { x: 0, y: 60, width: 1300 };
+        const incidentZoom = mobileViewport.matches ? 0 : smooth(.50, .66, p);
+        const x = 210 * (1 - zoom) + revealFrame.x * zoom + (incidentFrame.x - revealFrame.x) * incidentZoom;
+        const y = 115 * (1 - zoom) + revealFrame.y * zoom + (incidentFrame.y - revealFrame.y) * incidentZoom;
+        const width = 340 + (revealFrame.width - 340) * zoom + (incidentFrame.width - revealFrame.width) * incidentZoom;
         const height = width * 9 / 16;
         art.setAttribute("viewBox", `${x.toFixed(2)} ${y.toFixed(2)} ${width.toFixed(2)} ${height.toFixed(2)}`);
 
         const sceneReveal = smooth(.22, .48, p);
         field.setAttribute("opacity", (sceneReveal * .8).toFixed(3));
         const paintProgress = smooth(.39, .66, p);
-        sprayArm.setAttribute("transform", `rotate(${(paintProgress * 4).toFixed(2)} 1120 411)`);
-        paint.setAttribute("stroke-dashoffset", String(560 * (1 - paintProgress)));
-        paintDetail.setAttribute("stroke-dashoffset", String(70 * (1 - paintProgress)));
-        paintMist.setAttribute("opacity", (smooth(.46, .63, p) * .72).toFixed(3));
+        sprayArm.setAttribute("transform", `rotate(${(-34 + paintProgress * 4).toFixed(2)} 90 17)`);
+        paint.setAttribute("stroke-dashoffset", String(paintLength * (1 - paintProgress)));
+        paintDetail.setAttribute("stroke-dashoffset", String(paintDetailLength * (1 - paintProgress)));
+        const paintTip = paint.getPointAtLength(paintLength * paintProgress);
+        paintMist.setAttribute("cx", paintTip.x.toFixed(2));
+        paintMist.setAttribute("cy", paintTip.y.toFixed(2));
+        paintMist.setAttribute("opacity", (smooth(.46, .63, p) * (1 - smooth(.61, .66, p)) * .72).toFixed(3));
+        const sprayFade = smooth(.39, .43, p) * (1 - smooth(.47, .52, p));
+        paintSpray.setAttribute("opacity", (sprayFade * .68).toFixed(3));
         detection.setAttribute("opacity", smooth(.58, .72, p).toFixed(3));
+        const flameProgress = smooth(.35, .60, p);
+        const smokeProgress = [smooth(.42, .63, p), smooth(.51, .72, p), smooth(.60, .81, p)];
+        fireGlow.setAttribute("opacity", (smooth(.34, .53, p) * .8).toFixed(3));
+        fireFlames.setAttribute("opacity", flameProgress.toFixed(3));
+        fireSmoke.forEach((smoke, index) => {
+          smoke.setAttribute("opacity", (smokeProgress[index] * (.82 - index * .08)).toFixed(3));
+          smoke.setAttribute("transform", `translate(0 ${(-12 * smokeProgress[index]).toFixed(2)})`);
+        });
+        fireDetection.setAttribute("opacity", smooth(.58, .72, p).toFixed(3));
 
         const phoneProgress = smooth(.72, .89, p);
         phone.style.opacity = phoneProgress.toFixed(3);
@@ -651,113 +884,48 @@
         progressTrack.setAttribute("aria-valuenow", String(Math.round(p * 100)));
       }
 
-      function jumpTo(progress) {
-        const target = Number(progress);
-        if (reducedMotion.matches) {
-          const index = target < .35 ? 0 : target < .7 ? 2 : 3;
-          cards[index].scrollIntoView({ behavior: "auto", block: "center" });
-          return;
-        }
-        const pageTop = window.scrollY + track.getBoundingClientRect().top;
-        const scrollSpan = track.offsetHeight - window.innerHeight;
-        window.scrollTo({ top: pageTop + scrollSpan * target, behavior: "smooth" });
-      }
-
-      document.querySelectorAll("[data-jump]").forEach((button) => {
-        button.addEventListener("click", () => jumpTo(button.dataset.jump));
+      document.querySelectorAll("[data-scenario-option]").forEach((button) => {
+        button.addEventListener("click", () => selectScenario(button.dataset.scenarioOption));
       });
+      [headerControls, stickyControls].forEach((surface) => {
+        surface.addEventListener("focusout", () => window.requestAnimationFrame(updateControlSurfaces));
+      });
+      mobileViewport.addEventListener("change", () => render(state.progress));
+      window.addEventListener("scroll", updateControlSurfaces, { passive: true });
+      window.addEventListener("resize", updateControlSurfaces);
+      updateSelectionControls();
+      updateControlSurfaces();
 
       function start() {
+        updateControlSurfaces();
         if (reducedMotion.matches) {
           document.body.classList.add("reduced-motion-story");
           render(1);
+          initializing = false;
           return;
         }
 
         if (window.gsap && window.ScrollTrigger) {
           window.gsap.registerPlugin(window.ScrollTrigger);
-          window.gsap.to(state, {
-            progress: 1,
-            ease: "none",
-            scrollTrigger: {
-              trigger: track,
-              start: "top top",
-              end: "bottom bottom",
-              scrub: .35,
-              onUpdate: (self) => render(self.progress)
-            }
+          window.ScrollTrigger.create({
+            trigger: track,
+            start: "top top",
+            end: "bottom bottom",
+            onUpdate: (self) => render(self.progress)
           });
           window.ScrollTrigger.refresh();
+          render(readProgress());
         } else {
           window.addEventListener("scroll", () => render(readProgress()), { passive: true });
           window.addEventListener("resize", () => render(readProgress()));
           render(readProgress());
         }
+        initializing = false;
       }
 
       reducedMotion.addEventListener("change", () => window.location.reload());
       if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", start, { once: true });
       else start();
-    })();
-  </script>
-  <script>
-    (() => {
-      const plans = { start: { monthly: 29900, cameras: 4 }, campus: { monthly: 99900, cameras: 16 }, network: { monthly: 249900, cameras: 48 } };
-      const form = document.getElementById("quote-form");
-      const plan = document.getElementById("quote-plan");
-      const period = document.getElementById("quote-period");
-      const cameras = document.getElementById("quote-cameras");
-      const total = document.getElementById("quote-total");
-      const submit = document.getElementById("quote-submit");
-      const money = new Intl.NumberFormat("ru-KZ");
-      const annualDiscount = 0.15;
-      const quoteAmount = () => {
-        const monthly = plans[plan.value].monthly;
-        return period.value === "year" ? Math.round(monthly * 12 * (1 - annualDiscount)) : monthly;
-      };
-
-      function updateTotal() {
-        total.textContent = `Итого: ${money.format(quoteAmount())} ₸ ${period.value === "year" ? "за год" : "за месяц"}`;
-      }
-
-      function updatePlan() {
-        const selected = plans[plan.value];
-        cameras.max = String(selected.cameras);
-        if (Number(cameras.value) > selected.cameras) cameras.value = String(selected.cameras);
-        updateTotal();
-      }
-      plan.addEventListener("change", updatePlan);
-      period.addEventListener("change", updateTotal);
-      document.querySelectorAll("[data-select-plan]").forEach((button) => button.addEventListener("click", () => {
-        plan.value = button.dataset.selectPlan;
-        updatePlan();
-        form.scrollIntoView({ block: "start" });
-        plan.focus({ preventScroll: true });
-      }));
-      form.addEventListener("submit", (event) => {
-        event.preventDefault();
-        if (!form.reportValidity()) return;
-        const data = new FormData(form);
-        const lines = [
-          "Черновик запроса Crimetor (не является счетом к оплате)",
-          `Организация: ${data.get("organization").trim()}`,
-          `Рабочая почта: ${data.get("email")}`,
-          `Запрос: ${data.get("intent")}`,
-          `Тариф: ${plan.options[plan.selectedIndex].text}`,
-          `Период: ${period.value === "year" ? "год" : "месяц"}`,
-          `Камер: ${cameras.value} из ${plans[plan.value].cameras}`,
-          `Итого: ${money.format(quoteAmount())} ₸`,
-          `Дата: ${new Date().toLocaleDateString("ru-KZ")}`
-        ];
-        const url = URL.createObjectURL(new Blob(["\uFEFF", lines.join("\r\n")], { type: "text/plain;charset=utf-8" }));
-        const link = document.createElement("a");
-        link.href = url;
-        link.download = `crimetor-${plan.value}-request.txt`;
-        link.click();
-        setTimeout(() => URL.revokeObjectURL(url), 1000);
-      });
-      updatePlan();
-      submit.disabled = false;
     })();
   </script>
 </body>

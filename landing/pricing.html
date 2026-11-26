@@ -1,0 +1,176 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#090b10">
+  <meta name="description" content="Предварительные тарифы Crimetor для пилотного подключения видеонаблюдения.">
+  <title>Тарифы Crimetor</title>
+  <link rel="stylesheet" href="./site.css">
+  <link rel="stylesheet" href="./transitions.css">
+</head>
+<body>
+  <header class="site-header">
+    <div class="site-header-inner">
+      <a class="brand" href="./index.html" aria-label="Crimetor, к демонстрации">
+        <span class="brand-mark" aria-hidden="true">C</span>
+        <span>CRIMETOR</span>
+        <span class="brand-note">ТАРИФЫ</span>
+      </a>
+      <nav class="site-nav" aria-label="Главная навигация">
+        <a href="./index.html">Демо</a>
+        <a href="./assistant.html">ИИ-помощник</a>
+        <a href="#quote-form">Черновик заявки</a>
+      </nav>
+    </div>
+  </header>
+
+  <main class="page-shell">
+    <section class="page-hero" aria-labelledby="page-title">
+      <h1 class="page-title" id="page-title">Тарифы</h1>
+      <p class="page-lede">Предварительные планы для пилотного подключения. Стоимость фиксированная для выбранного плана в пределах лимита камер.</p>
+    </section>
+
+    <section class="pricing-section" aria-labelledby="plans-title">
+      <h2 class="section-heading" id="plans-title">Выберите план</h2>
+      <div class="plan-grid">
+        <article class="plan-card">
+          <h3>Start</h3>
+          <p class="price">29 900 ₸ <small>/ месяц</small></p>
+          <p>Годом авансом: 304 980 ₸ (-15%)</p>
+          <ul>
+            <li>До 4 камер, 1 здание, 3 пользователя</li>
+            <li>Метаданные инцидентов за 7 дней</li>
+            <li>Оповещения о подозрении на вандализм</li>
+          </ul>
+          <button type="button" data-select-plan="start">Выбрать Start</button>
+        </article>
+        <article class="plan-card">
+          <h3>Campus</h3>
+          <p class="price">99 900 ₸ <small>/ месяц</small></p>
+          <p>Годом авансом: 1 018 980 ₸ (-15%)</p>
+          <ul>
+            <li>До 16 камер, 3 здания, 10 пользователей</li>
+            <li>Метаданные инцидентов за 30 дней</li>
+            <li>Оповещения о подозрении на вандализм</li>
+          </ul>
+          <button type="button" data-select-plan="campus">Выбрать Campus</button>
+        </article>
+        <article class="plan-card">
+          <h3>Network</h3>
+          <p class="price">249 900 ₸ <small>/ месяц</small></p>
+          <p>Годом авансом: 2 548 980 ₸ (-15%)</p>
+          <ul>
+            <li>До 48 камер, 10 зданий, 30 пользователей</li>
+            <li>Метаданные инцидентов за 90 дней</li>
+            <li>Оповещения о подозрении на вандализм</li>
+          </ul>
+          <button type="button" data-select-plan="network">Выбрать Network</button>
+        </article>
+      </div>
+      <p class="pricing-footnote">Оборудование, подключение и настройка, а также архив видеозаписей рассчитываются отдельно.</p>
+
+      <form class="quote-form" id="quote-form" aria-labelledby="quote-title">
+        <div class="quote-heading">
+          <h3 id="quote-title">Черновик заявки</h3>
+          <p>Подготовьте запрос коммерческого предложения или счета и скачайте его на свое устройство. Данные формы никуда не отправляются.</p>
+          <p class="pricing-footnote">Оплата через Stripe запланирована.</p>
+        </div>
+        <label>Тариф
+          <select name="plan" id="quote-plan">
+            <option value="start">Start</option>
+            <option value="campus">Campus</option>
+            <option value="network">Network</option>
+          </select>
+        </label>
+        <label>Оплата
+          <select name="period" id="quote-period">
+            <option value="month">За месяц</option>
+            <option value="year">Годовая предоплата (-15%)</option>
+          </select>
+        </label>
+        <label>Количество камер
+          <input name="cameras" id="quote-cameras" type="number" min="1" max="4" step="1" value="1" required>
+        </label>
+        <label>Организация
+          <input name="organization" type="text" maxlength="120" autocomplete="organization" pattern=".*\S.*" title="Введите название организации" required>
+        </label>
+        <label>Рабочая почта
+          <input name="email" type="email" maxlength="254" autocomplete="email" required>
+        </label>
+        <label>Запрос
+          <select name="intent">
+            <option>Запрос предложения</option>
+            <option>Запрос счета на оплату</option>
+          </select>
+        </label>
+        <output class="quote-total" id="quote-total" aria-live="polite">Итого: -</output>
+        <button id="quote-submit" type="submit" disabled>Скачать черновик</button>
+      </form>
+    </section>
+  </main>
+
+  <footer class="footer-line"><span>CRIMETOR / DEMO</span><span>Тарифы для пилотных переговоров</span></footer>
+
+  <script>
+    (() => {
+      const plans = { start: { monthly: 29900, cameras: 4 }, campus: { monthly: 99900, cameras: 16 }, network: { monthly: 249900, cameras: 48 } };
+      const form = document.getElementById("quote-form");
+      const plan = document.getElementById("quote-plan");
+      const period = document.getElementById("quote-period");
+      const cameras = document.getElementById("quote-cameras");
+      const total = document.getElementById("quote-total");
+      const submit = document.getElementById("quote-submit");
+      const money = new Intl.NumberFormat("ru-KZ");
+      const annualDiscount = 0.15;
+      const quoteAmount = () => {
+        const monthly = plans[plan.value].monthly;
+        return period.value === "year" ? Math.round(monthly * 12 * (1 - annualDiscount)) : monthly;
+      };
+
+      function updateTotal() {
+        total.textContent = `Итого: ${money.format(quoteAmount())} ₸ ${period.value === "year" ? "за год" : "за месяц"}`;
+      }
+
+      function updatePlan() {
+        const selected = plans[plan.value];
+        cameras.max = String(selected.cameras);
+        if (Number(cameras.value) > selected.cameras) cameras.value = String(selected.cameras);
+        updateTotal();
+      }
+      plan.addEventListener("change", updatePlan);
+      period.addEventListener("change", updateTotal);
+      document.querySelectorAll("[data-select-plan]").forEach((button) => button.addEventListener("click", () => {
+        plan.value = button.dataset.selectPlan;
+        updatePlan();
+        form.scrollIntoView({ block: "start" });
+        plan.focus({ preventScroll: true });
+      }));
+      form.addEventListener("submit", (event) => {
+        event.preventDefault();
+        if (!form.reportValidity()) return;
+        const data = new FormData(form);
+        const lines = [
+          "Черновик запроса Crimetor (не является счетом к оплате)",
+          `Организация: ${data.get("organization").trim()}`,
+          `Рабочая почта: ${data.get("email")}`,
+          `Запрос: ${data.get("intent")}`,
+          `Тариф: ${plan.options[plan.selectedIndex].text}`,
+          `Период: ${period.value === "year" ? "год" : "месяц"}`,
+          `Камер: ${cameras.value} из ${plans[plan.value].cameras}`,
+          `Итого: ${money.format(quoteAmount())} ₸`,
+          `Дата: ${new Date().toLocaleDateString("ru-KZ")}`
+        ];
+        const url = URL.createObjectURL(new Blob(["\uFEFF", lines.join("\r\n")], { type: "text/plain;charset=utf-8" }));
+        const link = document.createElement("a");
+        link.href = url;
+        link.download = `crimetor-${plan.value}-request.txt`;
+        link.click();
+        setTimeout(() => URL.revokeObjectURL(url), 1000);
+      });
+      updatePlan();
+      submit.disabled = false;
+    })();
+  </script>
+</body>
+</html>

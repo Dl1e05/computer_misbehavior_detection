@@ -4,10 +4,11 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="theme-color" content="#090b10">
-  <meta name="description" content="Демонстрационный интерфейс Crimetor для вопросов о сценариях и тарифах.">
+  <meta name="description" content="ИИ-помощник Crimetor: навигация по сайту, тарифы и пошаговый показ оплаты.">
   <title>ИИ-помощник Crimetor</title>
   <link rel="stylesheet" href="./site.css">
   <link rel="stylesheet" href="./transitions.css">
+  <link rel="stylesheet" href="./assistant-widget.css">
 </head>
 <body>
   <header class="site-header">
@@ -27,106 +28,24 @@
   <main class="page-shell assistant-page">
     <section class="page-hero" aria-labelledby="page-title">
       <h1 class="page-title" id="page-title">ИИ-помощник</h1>
-      <p class="page-lede">Спросите о демонстрации, тарифах или черновике заявки.</p>
+      <p class="page-lede">Спросите о демо, тарифах или оплате. Помощник может сам открыть нужную страницу и показать, что нажать.</p>
     </section>
 
-    <section class="chat-card" aria-label="Демонстрационный чат-помощник">
-      <p class="chat-intro">Демо-режим. Ответы формируются из локальных заготовок. Подключение DeepSeek запланировано. Сообщения не отправляются.</p>
-      <div class="chat-log" id="chat-log" role="log" aria-live="polite" aria-relevant="additions text">
-        <article class="chat-message">
-          <strong>Помощник</strong>
-          <span>Здравствуйте! Я могу рассказать о сценариях демо, тарифах и черновике заявки. Например: какие сценарии есть в демо?</span>
-        </article>
-      </div>
+    <section class="chat-card" aria-label="Чат с ИИ-помощником">
+      <p class="chat-intro">Работает на DeepSeek. Вопросы отправляются на сервер сайта и в DeepSeek, не пишите в чат пароли и данные карт. Тот же помощник доступен кнопкой «ИИ» на других страницах. <button class="chat-clear" id="chat-clear" type="button">Очистить чат</button></p>
+      <div class="chat-log" id="chat-log" role="log" aria-live="polite" aria-relevant="additions text"></div>
+      <div class="chat-chips" id="chat-chips"></div>
       <form class="chat-form" id="chat-form">
         <label class="visually-hidden" for="chat-question">Ваш вопрос</label>
-        <input id="chat-question" type="text" maxlength="500" autocomplete="off" placeholder="Напишите вопрос" required>
+        <input id="chat-question" type="text" maxlength="1000" autocomplete="off" placeholder="Напишите вопрос" required>
         <button type="submit">Отправить</button>
       </form>
       <p class="chat-status" id="chat-status" role="status" aria-live="polite"></p>
     </section>
   </main>
 
-  <footer class="footer-line"><span>CRIMETOR / DEMO</span><span>Локальный прототип помощника</span></footer>
+  <footer class="footer-line"><span>CRIMETOR / DEMO</span><span>ИИ-помощник на DeepSeek</span></footer>
 
-  <script>
-    (() => {
-      const form = document.getElementById("chat-form");
-      const input = document.getElementById("chat-question");
-      const log = document.getElementById("chat-log");
-      const status = document.getElementById("chat-status");
-      const responses = [
-        {
-          keywords: ["deepseek", "дипсик", "искусствен", "нейросет"],
-          wholeKeywords: ["ии"],
-          answer: "Подключение DeepSeek запланировано. Сейчас помощник отвечает по локальным заготовкам."
-        },
-        {
-          keywords: ["худи"],
-          answer: "В сценарии вандализма остается вариант с человеком в худи. Это иллюстрация для демо."
-        },
-        {
-          keywords: ["пожар", "огонь", "дым", "вандал", "инцидент", "сценар"],
-          answer: "В демо можно выбрать между вандализмом и пожаром. Для вандализма остается вариант с человеком в худи. Это иллюстрация, распознавание камер и уведомления не подключены."
-        },
-        {
-          keywords: ["stripe", "страйп"],
-          answer: "Оплата через Stripe запланирована. Сейчас на странице тарифов доступно скачивание черновика заявки."
-        },
-        {
-          keywords: ["тариф", "цен", "стоим", "скид", "камер", "start", "campus", "network"],
-          answer: "Start стоит 29 900 ₸ в месяц или 304 980 ₸ за год. Campus стоит 99 900 ₸ в месяц или 1 018 980 ₸ за год. Network стоит 249 900 ₸ в месяц или 2 548 980 ₸ за год. Годовая предоплата дешевле на 15%. Лимиты составляют 4, 16 и 48 камер."
-        },
-        {
-          keywords: ["заяв", "счет", "счёт", "почт", "организац", "скачат", "черновик", "заполн", "оформ"],
-          wholeKeywords: ["форма", "формы", "форму", "форме"],
-          answer: "На странице тарифов выберите план и период оплаты, затем заполните организацию и рабочую почту. Скачанный текстовый файл будет черновиком запроса. Форма не отправляет данные."
-        },
-        {
-          keywords: ["оплат"],
-          answer: "Оплата через Stripe запланирована. Сейчас на странице тарифов доступно скачивание черновика заявки."
-        },
-        {
-          keywords: ["здравств", "привет", "добрый"],
-          answer: "Здравствуйте! Я могу подсказать про сценарии демо, тарифы и черновик заявки."
-        }
-      ];
-
-      function findResponse(question) {
-        const normalized = question.toLocaleLowerCase("ru-RU");
-        const tokens = normalized.split(/[^a-zа-яё0-9]+/i);
-        const match = responses.find((item) => item.keywords.some((keyword) => normalized.includes(keyword)) ||
-          (item.wholeKeywords && item.wholeKeywords.some((keyword) => tokens.includes(keyword))));
-        return match ? match.answer : "Пока я могу ответить о сценариях демо, тарифах, заявке и будущих интеграциях. Попробуйте спросить про вандализм, пожар, худи, цены или DeepSeek.";
-      }
-
-      function addMessage(author, message, isUser) {
-        const item = document.createElement("article");
-        item.className = isUser ? "chat-message chat-message--user" : "chat-message";
-        const label = document.createElement("strong");
-        label.textContent = author;
-        const content = document.createElement("span");
-        content.textContent = message;
-        item.append(label, content);
-        log.append(item);
-        log.scrollTop = log.scrollHeight;
-      }
-
-      form.addEventListener("submit", (event) => {
-        event.preventDefault();
-        const question = input.value.trim();
-        if (!question) {
-          status.textContent = "Введите вопрос.";
-          input.focus();
-          return;
-        }
-        addMessage("Вы", question, true);
-        addMessage("Помощник", findResponse(question), false);
-        input.value = "";
-        status.textContent = "Локальный ответ добавлен.";
-        input.focus();
-      });
-    })();
-  </script>
+  <script defer src="./assistant-widget.js"></script>
 </body>
 </html>

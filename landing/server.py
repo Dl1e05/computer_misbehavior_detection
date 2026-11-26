@@ -28,6 +28,8 @@ from pydantic import BaseModel, Field, field_validator, model_validator
 LANDING_DIR = Path(__file__).resolve().parent
 load_dotenv(LANDING_DIR / ".env")
 
+from assistant import router as assistant_router  # noqa: E402  (reads .env on import)
+
 STRIPE_SECRET_KEY = os.getenv("STRIPE_SECRET_KEY", "").strip()
 STRIPE_WEBHOOK_SECRET = os.getenv("STRIPE_WEBHOOK_SECRET", "").strip()
 PUBLIC_BASE_URL = os.getenv("PUBLIC_BASE_URL", "").strip().rstrip("/")
@@ -127,6 +129,7 @@ def require_stripe() -> stripe.StripeClient:
 
 
 app = FastAPI(title="Crimetor landing", docs_url=None, redoc_url=None, openapi_url=None)
+app.include_router(assistant_router)
 init_db()
 
 FIELD_TITLES = {
@@ -146,7 +149,7 @@ async def readable_validation_error(request: Request, exc: RequestValidationErro
         field = next((FIELD_TITLES[part] for part in error["loc"] if part in FIELD_TITLES), None)
         message = str(error.get("msg", "")).removeprefix("Value error, ")
         problems.append(f"{field}: проверьте значение" if field else message or "неверные данные")
-    log.info("Checkout rejected: %s", exc.errors())
+    log.info("Request rejected (%s): %s", request.url.path, exc.errors())
     return JSONResponse(status_code=422, content={"detail": "Проверьте поля формы. " + "; ".join(problems) + "."})
 
 

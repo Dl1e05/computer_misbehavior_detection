@@ -8,7 +8,14 @@ from typing import Any
 
 import pytest
 from sqlalchemy import func, select
-from sqlalchemy.exc import DBAPIError, IntegrityError, OperationalError
+from sqlalchemy.exc import (
+    DBAPIError,
+    IntegrityError,
+    InterfaceError,
+    OperationalError,
+    ProgrammingError,
+    StatementError,
+)
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.config import Settings
@@ -81,12 +88,25 @@ async def count(session: AsyncSession, model: type[Any]) -> int:
     return await session.scalar(select(func.count()).select_from(model)) or 0
 
 
-def database_error(cls: type[DBAPIError], *, invalidated: bool = False) -> DBAPIError:
+class DriverError(Exception):
+    """Like asyncpg's errors as SQLAlchemy wraps them: they carry a SQLSTATE."""
+
+    def __init__(self, sqlstate: str | None) -> None:
+        super().__init__("boom")
+        self.sqlstate = sqlstate
+
+
+def database_error(
+    cls: type[DBAPIError],
+    *,
+    sqlstate: str | None = None,
+    invalidated: bool = False,
+) -> DBAPIError:
     # Shaped like a real error: its message holds the SQL parameters.
     return cls(
         "INSERT ...",
         {"run_id": SECRET},
-        Exception("boom"),
+        DriverError(sqlstate),
         connection_invalidated=invalidated,
     )
 
@@ -135,9 +155,20 @@ async def test_received_at_is_the_given_time(
     "error",
     [
         pytest.param(ConnectionRefusedError(), id="connection refused"),
+        pytest.param(TimeoutError(), id="timeout"),
         pytest.param(database_error(OperationalError), id="operational error"),
         pytest.param(
-            database_error(DBAPIError, invalidated=True), id="connection lost"
+            database_error(InterfaceError, invalidated=True), id="connection lost"
+        ),
+        pytest.param(
+            database_error(DBAPIError, sqlstate="57P03"), id="database starting up"
+        ),
+        pytest.param(database_error(DBAPIError, sqlstate="57P01"), id="admin shutdown"),
+        pytest.param(
+            database_error(DBAPIError, sqlstate="53300"), id="too many connections"
+        ),
+        pytest.param(
+            database_error(DBAPIError, sqlstate="08006"), id="connection failure"
         ),
     ],
 )
@@ -168,7 +199,17 @@ async def test_database_unavailable_is_retried_without_limit(
     "error",
     [
         pytest.param(RuntimeError("bug"), id="bug"),
-        pytest.param(database_error(DBAPIError), id="value Postgres refuses"),
+        pytest.param(
+            database_error(DBAPIError, sqlstate="22P02"), id="value Postgres refuses"
+        ),
+        pytest.param(
+            database_error(DBAPIError, sqlstate="22000"), id="bad query argument"
+        ),
+        # A live connection misused by our code, not a lost one.
+        pytest.param(database_error(InterfaceError), id="interface error"),
+        pytest.param(
+            database_error(ProgrammingError, sqlstate="42P01"), id="missing table"
+        ),
     ],
 )
 async def test_failing_message_is_given_up_as_a_dead_letter(
@@ -188,7 +229,8 @@ async def test_failing_message_is_given_up_as_a_dead_letter(
     dead_letter = (await db_session.scalars(select(DeadLetter))).one()
     assert dead_letter.failure_code == "PROCESSING_ERROR"
     assert dead_letter.payload_hash == hashlib.sha256(raw).hexdigest()
-    assert dead_letter.raw_payload is None
+    # Kept, so the alarm can be replayed once the cause is fixed.
+    assert dead_letter.raw_payload == json.loads(raw)
     assert dead_letter.topic == TOPIC
     assert dead_letter.received_at == RECEIVED_AT
     assert await count(db_session, ProcessedEvent) == 0
@@ -271,6 +313,32 @@ async def test_dead_letter_that_fails_keeps_the_message(
     assert await count(db_session, DeadLetter) == 1
 
 
+@pytest.mark.usefixtures("camera_id")
+async def test_dead_letter_keeps_no_face_data_and_nothing_unstorable(
+    db_session: AsyncSession,
+    handler: EventMessageHandler,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # The same rules as every other dead letter (storable_payload).
+    patch_ingest(monkeypatch, failing(*[RuntimeError("bug")] * (MAX_ATTEMPTS * 2)))
+    with_face = json.loads(payload())
+    with_face["participants"][0]["embedding"] = [0.123456789]
+    unstorable = payload(note="a\u0000b")
+
+    for raw in (json.dumps(with_face).encode(), unstorable):
+        for _ in range(MAX_ATTEMPTS):
+            await handle(handler, raw)
+
+    stored = {
+        letter.payload_hash: letter.raw_payload
+        for letter in await db_session.scalars(select(DeadLetter))
+    }
+    kept = stored[hashlib.sha256(json.dumps(with_face).encode()).hexdigest()]
+    assert kept is not None
+    assert "embedding" not in kept["participants"][0]
+    assert stored[hashlib.sha256(unstorable).hexdigest()] is None
+
+
 # Logs
 
 
@@ -280,6 +348,11 @@ async def test_dead_letter_that_fails_keeps_the_message(
     [
         pytest.param(database_error(DBAPIError), id="database error"),
         pytest.param(database_error(OperationalError), id="database unavailable"),
+        # The parent of DBAPIError: raised before the query reaches the driver.
+        pytest.param(
+            StatementError("bad value", "INSERT ...", {"run_id": SECRET}, None),
+            id="statement error",
+        ),
     ],
 )
 async def test_logs_never_contain_event_values(

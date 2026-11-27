@@ -38,8 +38,30 @@ KINDS = {
 }
 
 
+DEFAULT_CAMERA = "cam-01"
+
+
 def event_topic(camera: str) -> str:
     return f"videoanalytics/v1/cameras/{camera}/events"
+
+
+def camera_for(camera: str | None, file: Path | None) -> str:
+    """--camera if given, else the file's camera_id, else cam-01.
+
+    The topic must name the event's camera, or BE rejects the event.
+    """
+    if camera is not None:
+        return camera
+    if file is not None:
+        try:
+            loaded = json.loads(file.read_bytes())
+        except ValueError:  # a broken file is published anyway
+            loaded = None
+        if isinstance(loaded, dict):
+            from_file = loaded.get("camera_id")
+            if isinstance(from_file, str) and from_file:
+                return from_file
+    return DEFAULT_CAMERA
 
 
 def build_event(
@@ -86,7 +108,9 @@ def _arguments(argv: list[str] | None) -> argparse.Namespace:
     source = parser.add_mutually_exclusive_group(required=True)
     source.add_argument("kind", nargs="?", choices=sorted(KINDS))
     source.add_argument("--file", type=Path, help="publish this JSON file as is")
-    parser.add_argument("--camera", default="cam-01", help="camera code")
+    parser.add_argument(
+        "--camera", help="camera code (default: the file's camera_id, or cam-01)"
+    )
     parser.add_argument("--zone", help="zone UUID (required for zone_intrusion)")
     parser.add_argument("--episode", default="episode-1", help="fight episode_id")
     parser.add_argument("--run-id", default=f"sim-{datetime.now(UTC):%Y%m%dT%H%M%S}")
@@ -108,7 +132,7 @@ def _message(args: argparse.Namespace) -> bytes:
         return bytes(args.file.read_bytes())
     event = build_event(
         args.kind,
-        camera=args.camera,
+        camera=camera_for(args.camera, None),
         run_id=args.run_id,
         zone=args.zone,
         episode=args.episode,
@@ -117,7 +141,7 @@ def _message(args: argparse.Namespace) -> bytes:
 
 
 async def _publish(args: argparse.Namespace) -> None:
-    topic = event_topic(args.camera)
+    topic = event_topic(camera_for(args.camera, args.file))
     settings = get_settings()
     async with aiomqtt.Client(
         settings.mqtt_host,

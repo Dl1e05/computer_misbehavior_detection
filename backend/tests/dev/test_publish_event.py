@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from app.dev.publish_event import KINDS, build_event, main
+from app.dev.publish_event import KINDS, build_event, camera_for, main
 from app.mqtt.events import EventLimits, MlEvent, parse_event
 
 NOW = datetime(2026, 10, 25, 9, 14, 4, tzinfo=UTC)
@@ -64,3 +64,23 @@ def test_file_is_published_byte_for_byte(
     file.write_bytes(b'{"event_id": "not-a-uuid"')
     main(["--file", str(file), "--dry-run"])
     assert capsys.readouterr().out == '{"event_id": "not-a-uuid"\n'
+
+
+@pytest.mark.parametrize(
+    ("camera", "content", "expected"),
+    [
+        pytest.param(
+            "cam-05", b'{"camera_id": "cam-02"}', "cam-05", id="--camera wins"
+        ),
+        pytest.param(None, b'{"camera_id": "cam-02"}', "cam-02", id="from the file"),
+        pytest.param(None, b'{"camera_id": 7}', "cam-01", id="not a code"),
+        pytest.param(None, b"not json", "cam-01", id="broken file"),
+    ],
+)
+def test_topic_camera_for_a_file(
+    tmp_path: Path, camera: str | None, content: bytes, expected: str
+) -> None:
+    # The topic must name the event's camera, or BE rejects the event.
+    file = tmp_path / "event.json"
+    file.write_bytes(content)
+    assert camera_for(camera, file) == expected

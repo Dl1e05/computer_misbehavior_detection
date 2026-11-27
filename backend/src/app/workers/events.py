@@ -10,9 +10,11 @@ not stop event intake.
 import asyncio
 import logging
 import signal
+from collections.abc import Callable
 from datetime import UTC, datetime
 
 import aiomqtt
+from sqlalchemy.ext.asyncio import AsyncEngine
 
 from app.config import Settings, get_settings
 from app.db.session import (
@@ -20,7 +22,12 @@ from app.db.session import (
     check_app_role_is_limited,
     create_session_factory,
 )
-from app.mqtt.consumer import Ack, EventMessageHandler
+from app.mqtt.consumer import (
+    Ack,
+    EventMessageHandler,
+    describe,
+    is_database_unavailable,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -57,7 +64,11 @@ def acknowledge(client: aiomqtt.Client, message: aiomqtt.Message) -> None:
     client._client.ack(message.mid, message.qos)
 
 
-async def consume(client: aiomqtt.Client, handler: EventMessageHandler) -> None:
+async def consume(
+    client: aiomqtt.Client,
+    handler: EventMessageHandler,
+    on_saved: Callable[[], None],
+) -> None:
     """Saves and acknowledges messages one at a time, in arrival order.
 
     Raises _NotSaved when a message must come again; aiomqtt.MqttError when
@@ -66,14 +77,33 @@ async def consume(client: aiomqtt.Client, handler: EventMessageHandler) -> None:
     await client.subscribe(EVENT_TOPICS, qos=1)
     async for message in client.messages:
         received_at = datetime.now(UTC)
-        # aiomqtt types payloads loosely; a received one is always bytes.
-        payload = message.payload
-        if not isinstance(payload, bytes):
-            raise TypeError(f"unexpected payload type {type(payload).__name__}")
-        ack = await handler.handle(str(message.topic), payload, received_at)
+        ack = await handler.handle(str(message.topic), message.payload, received_at)
         if ack is Ack.RETRY:
             raise _NotSaved
         acknowledge(client, message)
+        on_saved()
+
+
+async def wait_for_database(engine: AsyncEngine) -> None:
+    """Checks the database login, waiting while the database is unreachable.
+
+    The worker may start before Postgres is ready (compose, reboot). An
+    unsafe login still stops it at once.
+    """
+    delay = FIRST_DELAY
+    while True:
+        try:
+            await check_app_role_is_limited(engine)
+        except Exception as error:
+            if not is_database_unavailable(error):
+                raise
+            logger.warning(
+                "database not reachable (%s), retry in %.0fs", describe(error), delay
+            )
+            await asyncio.sleep(delay)
+            delay = min(delay * 2, MAX_DELAY)
+        else:
+            return
 
 
 async def run(settings: Settings) -> None:
@@ -84,15 +114,21 @@ async def run(settings: Settings) -> None:
     """
     engine = build_engine(settings)
     try:
-        await check_app_role_is_limited(engine)
+        await wait_for_database(engine)
         handler = EventMessageHandler(create_session_factory(engine), settings)
         delay = FIRST_DELAY
+
+        def saved() -> None:
+            # Reset only after progress: connecting alone proves nothing, and
+            # a message that keeps failing must not be retried every second.
+            nonlocal delay
+            delay = FIRST_DELAY
+
         while True:
             try:
                 async with new_client(settings) as client:
                     logger.info("connected to the MQTT broker")
-                    delay = FIRST_DELAY
-                    await consume(client, handler)
+                    await consume(client, handler, saved)
             except aiomqtt.MqttError as error:
                 logger.warning(
                     "MQTT connection lost (%s), retry in %.0fs", error, delay

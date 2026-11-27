@@ -5,7 +5,9 @@ db_session; every test starts and ends with empty tables.
 """
 
 import asyncio
+import itertools
 import json
+import time
 import uuid
 from collections.abc import AsyncIterator, Callable, Coroutine, Iterator
 from datetime import datetime
@@ -14,12 +16,22 @@ from typing import Any
 import aiomqtt
 import pytest
 from sqlalchemy import func, select, text
-from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+from sqlalchemy.ext.asyncio import (
+    AsyncEngine,
+    AsyncSession,
+    async_sessionmaker,
+    create_async_engine,
+)
 from testcontainers.community.mqtt import MosquittoContainer
 
 from app.config import Settings, get_settings
 from app.db.models import Camera, Incident, ProcessedEvent
-from app.db.session import build_engine, create_session_factory
+from app.db.session import (
+    UnsafeDatabaseRoleError,
+    build_engine,
+    check_app_role_is_limited,
+    create_session_factory,
+)
 from app.domain.camera import CameraSourceType
 from app.mqtt.consumer import Ack, EventMessageHandler
 from app.services.ingest import IngestOutcome, ingest_event
@@ -281,3 +293,81 @@ async def test_crash_before_acknowledgement_gives_a_duplicate(
 
     await wait_until(got_again)
     assert await count(sessions, Incident) == 1
+
+
+async def test_retry_delay_grows_and_resets_after_progress(
+    settings: Settings,
+    sessions: async_sessionmaker[AsyncSession],
+    running: Worker,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # Connecting is not progress: while a message keeps failing, the pause
+    # doubles (0.1, 0.2, 0.4 s). A saved message starts it again at 0.1 s.
+    monkeypatch.setattr(worker, "MAX_DELAY", 0.4)
+    real = EventMessageHandler.handle
+    first, second = fall(), fall()
+    tries: dict[bytes, list[float]] = {first: [], second: []}
+    failures = {first: 4, second: 1}
+
+    async def fails_at_first(
+        self: EventMessageHandler, topic: str, payload: bytes, received_at: datetime
+    ) -> Ack:
+        tries[payload].append(time.monotonic())
+        if len(tries[payload]) <= failures[payload]:
+            return Ack.RETRY
+        return await real(self, topic, payload, received_at)
+
+    monkeypatch.setattr(EventMessageHandler, "handle", fails_at_first)
+    await running.start()
+    await publish(settings, first, second)
+    await processed(sessions, 2)
+
+    pauses = [later - earlier for earlier, later in itertools.pairwise(tries[first])]
+    # Each pause also holds a reconnect, so compare them with each other.
+    assert pauses[2] > pauses[0] + 0.2  # 0.4 s against 0.1 s
+    after_progress = tries[second][1] - tries[second][0]
+    assert after_progress < pauses[2] - 0.15
+
+
+# Without a broker
+
+
+async def test_worker_waits_for_the_database(
+    migrated_db: Settings, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # Started before Postgres is ready: retried, not a crash.
+    monkeypatch.setattr(worker, "FIRST_DELAY", 0.01)
+    tries = 0
+
+    async def not_ready_twice(engine: AsyncEngine) -> None:
+        nonlocal tries
+        tries += 1
+        if tries <= 2:
+            raise ConnectionRefusedError
+        await check_app_role_is_limited(engine)
+
+    monkeypatch.setattr("app.workers.events.check_app_role_is_limited", not_ready_twice)
+    engine = build_engine(migrated_db)
+    try:
+        await worker.wait_for_database(engine)
+    finally:
+        await engine.dispose()
+    assert tries == 3
+
+
+async def test_worker_stops_on_an_unsafe_database_login(
+    migrated_db: Settings, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    async def unsafe(engine: AsyncEngine) -> None:
+        raise UnsafeDatabaseRoleError("superuser")
+
+    monkeypatch.setattr("app.workers.events.check_app_role_is_limited", unsafe)
+    monkeypatch.setattr(worker, "FIRST_DELAY", 0.01)
+    engine = build_engine(migrated_db)
+    try:
+        # A timeout, so waiting forever fails instead of hanging the run.
+        with pytest.raises(UnsafeDatabaseRoleError):
+            async with asyncio.timeout(TIMEOUT):
+                await worker.wait_for_database(engine)
+    finally:
+        await engine.dispose()

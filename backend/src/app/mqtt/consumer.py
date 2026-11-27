@@ -11,7 +11,7 @@ from collections import Counter
 from datetime import datetime, timedelta
 from enum import StrEnum
 
-from sqlalchemy.exc import DBAPIError, InterfaceError, OperationalError
+from sqlalchemy.exc import DBAPIError, OperationalError, StatementError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.config import Settings
@@ -19,7 +19,7 @@ from app.db.models import DeadLetter
 from app.domain.event import FailureCode
 from app.mqtt.events import EventLimits
 from app.services.incidents import IncidentTimings
-from app.services.ingest import ingest_event
+from app.services.ingest import ingest_event, load_object, storable_payload
 
 logger = logging.getLogger(__name__)
 
@@ -59,7 +59,13 @@ class EventMessageHandler:
                 )
                 await session.commit()
         except Exception as error:
-            return await self._failed(error, topic, payload_hash, received_at)
+            return await self._failed(
+                error,
+                topic=topic,
+                payload=payload,
+                payload_hash=payload_hash,
+                received_at=received_at,
+            )
 
         self._failures.pop(payload_hash, None)
         logger.info(
@@ -68,14 +74,20 @@ class EventMessageHandler:
         return Ack.ACK
 
     async def _failed(
-        self, error: Exception, topic: str, payload_hash: str, received_at: datetime
+        self,
+        error: Exception,
+        *,
+        topic: str,
+        payload: bytes,
+        payload_hash: str,
+        received_at: datetime,
     ) -> Ack:
-        if _is_connection_error(error):
+        if is_database_unavailable(error):
             # Not counted: a valid alarm must not become a dead letter only
             # because the database was restarting.
             logger.warning(
                 "event not saved, database unavailable (%s): topic=%s hash=%s",
-                _describe(error),
+                describe(error),
                 topic,
                 payload_hash,
             )
@@ -87,12 +99,12 @@ class EventMessageHandler:
             "event processing failed, attempt %d of %d (%s): topic=%s hash=%s",
             attempt,
             MAX_ATTEMPTS,
-            _describe(error),
+            describe(error),
             topic,
             payload_hash,
-            # Our own errors get a traceback; database errors would print the
-            # SQL parameters, which hold the event's values.
-            exc_info=not isinstance(error, DBAPIError),
+            # Our own errors get a traceback; SQL errors would print the
+            # statement's parameters, which hold the event's values.
+            exc_info=not isinstance(error, StatementError),
         )
         if attempt < MAX_ATTEMPTS:
             # A race on a unique key passes on the next try.
@@ -100,23 +112,25 @@ class EventMessageHandler:
 
         try:
             async with self._session_factory() as session:
-                # Hash only: the payload is what could not be saved.
+                # The payload is kept when it can be (without face data), so
+                # the alarm can be replayed once the cause is fixed.
                 session.add(
                     DeadLetter(
                         received_at=received_at,
                         topic=topic,
                         failure_code=FailureCode.PROCESSING_ERROR.value,
                         payload_hash=payload_hash,
-                        raw_payload=None,
+                        raw_payload=storable_payload(load_object(payload)),
                     )
                 )
                 await session.commit()
         except Exception as dead_letter_error:
-            # Kept unacknowledged; the count stays, so the next try gives up
-            # again at once.
+            # Kept unacknowledged, and the count stays: the next delivery is
+            # processed again, and if it fails the same way, it goes straight
+            # to the dead letter.
             logger.error(
                 "dead letter not saved (%s): topic=%s hash=%s",
-                _describe(dead_letter_error),
+                describe(dead_letter_error),
                 topic,
                 payload_hash,
             )
@@ -132,17 +146,31 @@ class EventMessageHandler:
         return Ack.ACK
 
 
-def _is_connection_error(error: Exception) -> bool:
+# SQLSTATE classes that say nothing about the message: connection exception,
+# insufficient resources (e.g. too many connections), operator intervention
+# (e.g. the database is starting up or shutting down).
+_UNAVAILABLE_SQLSTATE_CLASSES = frozenset({"08", "53", "57"})
+
+
+def is_database_unavailable(error: Exception) -> bool:
+    """True if the database failed, not the message: retry without limit."""
     # A refused connection arrives as a plain OSError, not wrapped by
-    # SQLAlchemy; a connection lost during a query is a DBAPIError that
-    # invalidated the connection.
-    if isinstance(error, DBAPIError) and error.connection_invalidated:
+    # SQLAlchemy.
+    if isinstance(error, OSError):
         return True
-    return isinstance(error, (OperationalError, InterfaceError, OSError))
+    if not isinstance(error, DBAPIError):
+        return False
+    # A connection lost during a query; asyncpg reports it as InterfaceError.
+    # An InterfaceError without this is a bug and is counted.
+    if error.connection_invalidated or isinstance(error, OperationalError):
+        return True
+    sqlstate = getattr(error.orig, "sqlstate", None)
+    return isinstance(sqlstate, str) and sqlstate[:2] in _UNAVAILABLE_SQLSTATE_CLASSES
 
 
-def _describe(error: Exception) -> str:
-    # Class names only: the message of a database error holds SQL parameters.
+def describe(error: Exception) -> str:
+    """Class names only: an SQL error's message holds its parameters."""
     if isinstance(error, DBAPIError):
-        return f"{type(error).__name__}: {type(error.orig).__name__}"
+        sqlstate = getattr(error.orig, "sqlstate", None)
+        return f"{type(error).__name__}: {type(error.orig).__name__} {sqlstate or ''}"
     return type(error).__name__

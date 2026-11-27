@@ -35,6 +35,10 @@ class FailureCode(StrEnum):
     DUPLICATE_EVENT = "DUPLICATE_EVENT"
     EVENT_ID_CONFLICT = "EVENT_ID_CONFLICT"
     INVALID_TRANSITION = "INVALID_TRANSITION"
+    # Proposed, not in the SRS: the message failed to save several times for
+    # a reason other than a lost connection (a bug or a value Postgres
+    # refuses). Only its hash is kept. Never returned by parse_event.
+    PROCESSING_ERROR = "PROCESSING_ERROR"
 
 
 # V7: which incident types each stage may carry (OQ-19 interpretation).

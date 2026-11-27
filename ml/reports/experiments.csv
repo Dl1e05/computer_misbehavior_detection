@@ -1,0 +1,2 @@
+id,date,model,data,data_hash,params,best_epoch,val_mAP50,val_mAP50-95,val_P,val_R,per_class,weights,note
+fire-check-5ep,2026-11-28 02:43,yolo26n.pt,d-fire v1 (fire_img_*_v1.txt),65f73ad1575d,"{""epochs"": 5, ""imgsz"": 640, ""batch"": -1, ""patience"": 5, ""fraction"": 0.3}",5,0.1924,0.0967,0.4658,0.1765,"{""smoke"": {""P"": 0.418, ""R"": 0.107, ""mAP50"": 0.117}, ""fire"": {""P"": 0.514, ""R"": 0.246, ""mAP50"": 0.267}}",runs\fire\check-5ep\weights\best.pt,проверка кривой: 5 эпох на 30% train

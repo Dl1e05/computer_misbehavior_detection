@@ -1,0 +1,9 @@
+# M1: огонь и дым на D-Fire. Списки собирает scripts/prepare_fire_data.py.
+# Порядок классов — как в разметке D-Fire (0 smoke, 1 fire), FireDetector берёт имена из весов.
+path: data/processed/fire/v1   # от папки ml; train.py подставляет абсолютный путь
+train: train.txt
+val: val.txt                         # 15% train, по блокам соседних кадров — без утечки
+test: test.txt                       # авторский test D-Fire — один раз в конце
+names:
+  0: smoke
+  1: fire

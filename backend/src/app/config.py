@@ -57,6 +57,10 @@ class Settings(BaseSettings):
     mqtt_port: int = Field(ge=1, le=65535)
     mqtt_username: str
     mqtt_password: SecretStr
+    # Fixed, so the broker keeps this subscriber's persistent session (and
+    # its messages) while the event worker is down. Only one worker may use it:
+    # a second connection with the same id disconnects the first.
+    mqtt_client_id: str = Field(default="be-events", min_length=1)
 
     # Independent signing secrets (SRS §14.4): long enough for HMAC-SHA256
     # and never the same, so a clip link can't pass as a session token.

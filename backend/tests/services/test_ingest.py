@@ -382,6 +382,33 @@ async def test_unregistered_camera_is_rejected(db_session: AsyncSession) -> None
     assert dead_letter.raw_payload["camera_id"] == "cam-09"
 
 
+@pytest.mark.usefixtures("camera_id")
+@pytest.mark.parametrize(
+    "topic",
+    [
+        pytest.param("videoanalytics/v1/cameras/cam-02/events", id="other camera"),
+        pytest.param("videoanalytics/v1/cameras/cam-01/participants", id="not events"),
+        pytest.param("videoanalytics/v1/cameras/cam-01/events/x", id="too long"),
+        pytest.param("videoanalytics/v2/cameras/cam-01/events", id="other version"),
+        pytest.param("cam-01", id="no prefix"),
+    ],
+)
+async def test_topic_must_name_the_event_camera(
+    db_session: AsyncSession, make_camera: MakeCamera, topic: str
+) -> None:
+    # cam-02 exists too: a known camera in the topic is still not enough.
+    await make_camera("cam-02")
+    outcome = await ingest_event(
+        db_session, encode(event()), topic=topic, limits=LIMITS, timings=TIMINGS
+    )
+
+    assert outcome.code is FailureCode.UNKNOWN_CAMERA
+    dead_letter = await only_dead_letter(db_session)
+    assert dead_letter.topic == topic
+    for model in INCIDENT_ROWS:
+        assert await count(db_session, model) == 0
+
+
 async def test_disabled_camera_is_rejected(
     db_session: AsyncSession, camera_id: uuid.UUID
 ) -> None:

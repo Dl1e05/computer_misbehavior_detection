@@ -8,6 +8,7 @@ leaves the message unacknowledged and the broker delivers it again (§7.1).
 import hashlib
 import json
 import logging
+import re
 import uuid
 from dataclasses import dataclass
 from datetime import datetime
@@ -40,6 +41,9 @@ logger = logging.getLogger(__name__)
 # SRS §7.1: 256 KB per event without embeddings. A larger dead letter keeps
 # only its hash.
 DEAD_LETTER_PAYLOAD_MAX_BYTES = 256 * 1024
+
+# videoanalytics/v1/cameras/{camera_id}/events (SRS §7.1).
+_EVENT_TOPIC = re.compile(r"videoanalytics/v1/cameras/([^/]+)/events")
 
 
 class IngestStatus(StrEnum):
@@ -103,6 +107,13 @@ async def ingest_event(
             )
         )
 
+    # The topic names the camera as well. If the two differ, one of them is
+    # wrong, and the incident could appear at the wrong place.
+    if _topic_camera(topic) != event.camera_id:
+        return await reject(
+            Rejection(FailureCode.UNKNOWN_CAMERA, "camera_id: does not match the topic")
+        )
+
     # V8. Known deviation from the V order: parse_event has already applied
     # V9 and V11..V14, so an unknown camera next to such a fault is reported
     # as that fault. Handling (§7.5) is the same, only the code differs.
@@ -144,6 +155,11 @@ async def ingest_event(
                 "event_type: does not fit the incident's status",
             )
         )
+
+
+def _topic_camera(topic: str) -> str | None:
+    match = _EVENT_TOPIC.fullmatch(topic)
+    return match.group(1) if match is not None else None
 
 
 async def _usable_zone(

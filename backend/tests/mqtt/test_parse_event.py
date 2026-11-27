@@ -99,6 +99,10 @@ def test_null_participant_confidence_counts_as_missing() -> None:
         ({"participants": "17"}, FailureCode.INVALID_PARTICIPANTS),
         ({"model_version": "x" * 129}, FailureCode.INVALID_FIELD),
         ({"episode_id": 5}, FailureCode.INVALID_FIELD),
+        ({"episode_id": "e" * 129}, FailureCode.INVALID_FIELD),
+        ({"episode_id": "e" * 128}, None),
+        # An empty episode is no episode; rejecting it would lose an alarm.
+        ({"episode_id": ""}, None),
         ({"run_id": "r" * 129}, FailureCode.INVALID_FIELD),
         ({"bbox": [0.1, 0.1, 1.1, 0.9]}, FailureCode.INVALID_FIELD),
         ({"bbox": [0.9, 0.1, 0.1, 0.9]}, FailureCode.INVALID_FIELD),
@@ -262,6 +266,7 @@ def test_known_deviation_cross_field_rule_next_to_field_error() -> None:
         ("model_version", FailureCode.INVALID_FIELD),
         ("zone_id", FailureCode.INVALID_ZONE),
         ("run_id", FailureCode.INVALID_FIELD),
+        ("episode_id", FailureCode.INVALID_FIELD),
     ],
 )
 def test_nul_in_text_is_rejected(field: str, expected: FailureCode) -> None:

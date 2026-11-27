@@ -27,7 +27,13 @@ from app.mqtt.events import (
     Rejection,
     parse_event,
 )
-from app.services.incidents import IncidentTimings, create_from_detection
+from app.services.incidents import (
+    IncidentTimings,
+    InvalidTransition,
+    create_from_detection,
+    handle_confirmation,
+    handle_suspicion,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -62,8 +68,7 @@ async def ingest_event(
     """Validate and record one event; write nothing that cannot be stored.
 
     Every path ends in exactly one of: a processed_events row (accepted, with
-    the incident of a detection), nothing new (duplicate), or a dead_letters
-    row (rejected).
+    its incident), nothing new (duplicate), or a dead_letters row (rejected).
     """
     payload_hash = hashlib.sha256(raw).hexdigest()
 
@@ -120,15 +125,25 @@ async def ingest_event(
                 )
             )
 
-    return await _accept(
-        session,
-        event,
-        payload_hash=payload_hash,
-        camera=camera,
-        zone=zone,
-        received_at=limits.received_at,
-        timings=timings,
-    )
+    try:
+        return await _accept(
+            session,
+            event,
+            payload_hash=payload_hash,
+            camera=camera,
+            zone=zone,
+            received_at=limits.received_at,
+            timings=timings,
+        )
+    except InvalidTransition:
+        # V17. Raised before anything is written, so only the dead letter
+        # is saved. A fixed text: detail never holds input values.
+        return await reject(
+            Rejection(
+                FailureCode.INVALID_TRANSITION,
+                "event_type: does not fit the incident's status",
+            )
+        )
 
 
 async def _usable_zone(
@@ -155,21 +170,25 @@ async def _accept(
     received_at: datetime,
     timings: IncidentTimings,
 ) -> IngestOutcome:
-    _warn_if_skewed(event, received_at, timings)
-
-    # Fight events are only recorded for now: suspicion and confirmation have
-    # transitions of their own (OQ-19).
-    incident_id: uuid.UUID | None = None
+    # T2 for detection; T1 and T3 for fights (OQ-19). Every accepted event
+    # belongs to an incident, a new one or one it repeats.
     if event.event_type is EventType.DETECTION:
-        incident = await create_from_detection(
-            session,
-            event,
-            camera=camera,
-            zone=zone,
-            received_at=received_at,
-            timings=timings,
-        )
-        incident_id = incident.id
+        handle = create_from_detection
+    elif event.event_type is EventType.SUSPICION:
+        handle = handle_suspicion
+    else:
+        handle = handle_confirmation
+    incident = await handle(
+        session,
+        event,
+        camera=camera,
+        zone=zone,
+        received_at=received_at,
+        timings=timings,
+    )
+    # After the incident: a rejected event (InvalidTransition) is not warned
+    # about, its dead letter is enough.
+    _warn_if_skewed(event, received_at, timings)
 
     # Build the whole result before adding the row: the JSONB column does not
     # track later in-place changes, so the caller gets a copy.
@@ -178,7 +197,7 @@ async def _accept(
     # copy comes back and is a DUPLICATE.
     result: dict[str, Any] = {
         "outcome": "accepted",
-        "incident_id": str(incident_id) if incident_id is not None else None,
+        "incident_id": str(incident.id),
         "event_type": event.event_type.value,
         "run_id": event.run_id,
     }

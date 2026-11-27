@@ -1,5 +1,6 @@
 import math
 import uuid
+from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime
 
 import pytest
@@ -7,14 +8,19 @@ from sqlalchemy import select, text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.db.models import Incident, Participant
+from app.db.models import Camera, Incident, Participant
 from app.domain.incident import (
     SEVERITY_BY_TYPE,
+    TERMINAL_STATUSES,
     ClipState,
     IncidentStatus,
     IncidentType,
     Severity,
 )
+
+# The make_camera fixture (tests/conftest.py); test modules cannot import
+# conftest types.
+MakeCamera = Callable[[str], Awaitable[Camera]]
 
 
 def make_incident(camera_id: uuid.UUID, **changes: object) -> Incident:
@@ -402,3 +408,67 @@ async def test_incident_needs_a_model_version(
     db_session.add(make_incident(camera_id, model_version=None))
     with pytest.raises(IntegrityError, match="model_version"):
         await db_session.flush()
+
+
+# One open fight per camera and episode
+
+
+def make_fight(camera_id: uuid.UUID, **changes: object) -> Incident:
+    fight = {
+        "incident_type": IncidentType.FIGHT,
+        "severity": Severity.CRITICAL,
+        "status": IncidentStatus.SUSPECTED,
+        "episode_id": "episode-1",
+    }
+    return make_incident(camera_id, **(fight | changes))
+
+
+async def test_second_open_fight_of_an_episode_is_refused(
+    db_session: AsyncSession, camera_id: uuid.UUID
+) -> None:
+    db_session.add(make_fight(camera_id))
+    await db_session.flush()
+
+    db_session.add(make_fight(camera_id, status=IncidentStatus.NEW))
+    with pytest.raises(IntegrityError, match="uq_incidents_open_episode"):
+        await db_session.flush()
+
+
+async def test_only_open_incidents_count_for_an_episode(
+    db_session: AsyncSession, camera_id: uuid.UUID
+) -> None:
+    # Autogenerate does not compare the index condition, so a change to
+    # TERMINAL_STATUSES without a migration would only show up here.
+    clashing = set()
+    for status in IncidentStatus:
+        episode = f"episode-{status.value}"
+        try:
+            async with db_session.begin_nested():
+                db_session.add(
+                    make_fight(
+                        camera_id, status=status, episode_id=episode, measures="x"
+                    )
+                )
+                await db_session.flush()
+                db_session.add(make_fight(camera_id, episode_id=episode))
+        except IntegrityError:
+            clashing.add(status)
+
+    assert clashing == set(IncidentStatus) - TERMINAL_STATUSES
+
+
+async def test_same_episode_on_another_camera_is_accepted(
+    db_session: AsyncSession, camera_id: uuid.UUID, make_camera: MakeCamera
+) -> None:
+    other = await make_camera("cam-02")
+    db_session.add_all([make_fight(camera_id), make_fight(other.id)])
+    await db_session.flush()
+
+
+async def test_incidents_without_an_episode_never_clash(
+    db_session: AsyncSession, camera_id: uuid.UUID
+) -> None:
+    db_session.add_all(
+        [make_fight(camera_id, episode_id=None), make_fight(camera_id, episode_id=None)]
+    )
+    await db_session.flush()

@@ -17,6 +17,7 @@ from sqlalchemy.orm import Mapped, mapped_column
 from app.db.base import Base, EntityMixin
 from app.domain.incident import (
     SEVERITY_BY_TYPE,
+    TERMINAL_STATUSES,
     ClipRecordState,
     ClipState,
     IncidentStatus,
@@ -46,6 +47,11 @@ _BBOX_NORMALIZED = (
 # Built from the enum, so the partial indexes cannot silently match nothing.
 _TIMER_PENDING = f"state = '{TimerState.PENDING.value}'"
 
+# Sorted, so the text (and the migration) does not change between runs.
+_INCIDENT_OPEN = "status NOT IN ({})".format(
+    ", ".join(f"'{status.value}'" for status in sorted(TERMINAL_STATUSES))
+)
+
 
 class Incident(EntityMixin, Base):
     __tablename__ = "incidents"
@@ -74,6 +80,17 @@ class Incident(EntityMixin, Base):
         CheckConstraint(_BBOX_NORMALIZED, name="bbox_normalized"),
         CheckConstraint(
             "confidence >= 0 AND confidence <= 1", name="confidence_in_range"
+        ),
+        # One open fight per camera and episode: a suspicion and its
+        # confirmation find the same incident, and two copies of one event
+        # that arrive together cannot both create one. After a fight ends,
+        # the same episode_id may start a new incident. NULLs never clash.
+        Index(
+            "uq_incidents_open_episode",
+            "camera_id",
+            "episode_id",
+            unique=True,
+            postgresql_where=text(_INCIDENT_OPEN),
         ),
     )
 
@@ -110,6 +127,9 @@ class Incident(EntityMixin, Base):
     confirmed_at: Mapped[datetime | None]
     rejected_at: Mapped[datetime | None]
     closed_at: Mapped[datetime | None]
+
+    # Fights only: links a suspicion to its confirmation (from ML).
+    episode_id: Mapped[str | None]
 
 
 class Participant(EntityMixin, Base):

@@ -166,13 +166,24 @@ class MlEvent(BaseModel):
     bbox: NormalizedBox | None = None
     participants: list[Participant] = Field(default_factory=list)
     sent_at: AwareDatetime | None = None
-    # Links a fight suspicion to its confirmation.
-    episode_id: str | None = None
+    # Links a fight suspicion to its confirmation. Limited because it goes into
+    # a unique index: a B-tree entry holds about 2700 bytes, and a longer value
+    # would fail to save, so the message would come back forever.
+    episode_id: str | None = Field(default=None, max_length=128)
 
     @field_validator("*")
     @classmethod
     def _no_nul(cls, value: object) -> object:
         return _without_nul(value)
+
+    @field_validator("episode_id")
+    @classmethod
+    def _blank_episode_is_none(cls, value: str | None) -> str | None:
+        # A blank episode is no episode: it must not join two different
+        # fights, and rejecting it would lose an alarm.
+        if value is not None and not value.strip():
+            return None
+        return value
 
     @field_validator("schema_version")
     @classmethod

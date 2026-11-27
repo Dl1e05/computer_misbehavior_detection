@@ -31,6 +31,7 @@ from app.services.ingest import IngestOutcome, IngestStatus, ingest_event
 RECEIVED_AT = datetime(2026, 10, 25, 9, 14, 4, tzinfo=UTC)
 LIMITS = EventLimits(received_at=RECEIVED_AT, max_future=timedelta(seconds=60))
 TIMINGS = IncidentTimings(
+    suspicion=timedelta(seconds=10),
     escalation=timedelta(seconds=30),
     clip_pre_roll=timedelta(seconds=5),
     clip_post_roll=timedelta(seconds=5),
@@ -133,26 +134,62 @@ async def test_zone_intrusion_with_own_active_zone_is_accepted(
     assert incident.zone_id == zone_id
 
 
+def fight(event_type: str, **changes: Any) -> bytes:
+    """A fight event of episode-1, each with its own event_id."""
+    return encode(
+        event(
+            **{
+                "event_id": str(uuid.uuid4()),
+                "event_type": event_type,
+                "incident_type": "fight",
+                "episode_id": "episode-1",
+            }
+            | changes
+        )
+    )
+
+
 @pytest.mark.usefixtures("camera_id")
-@pytest.mark.parametrize("event_type", ["suspicion", "confirmation"])
-async def test_fight_is_accepted_without_an_incident(
-    db_session: AsyncSession, event_type: str
+async def test_suspicion_and_confirmation_share_an_incident(
+    db_session: AsyncSession,
 ) -> None:
-    # Fights get their transitions later; until then the event is only recorded.
-    raw = encode(event(event_type=event_type, incident_type="fight"))
-    outcome = await ingest(db_session, raw)
+    suspicion = await ingest(db_session, fight("suspicion"))
+    confirmation = await ingest(db_session, fight("confirmation"))
+
+    incident = (await db_session.scalars(select(Incident))).one()
+    assert suspicion.result == {
+        "outcome": "accepted",
+        "incident_id": str(incident.id),
+        "event_type": "suspicion",
+        "run_id": "run-1",
+    }
+    assert confirmation.result is not None
+    assert confirmation.result["incident_id"] == str(incident.id)
+    assert confirmation.result["event_type"] == "confirmation"
+
+
+@pytest.mark.usefixtures("camera_id")
+async def test_late_suspicion_is_a_dead_letter(
+    db_session: AsyncSession, caplog: pytest.LogCaptureFixture
+) -> None:
+    # V17 (§7.8, T-EV-05): discard, record, acknowledge.
+    await ingest(db_session, fight("confirmation"))
+    caplog.clear()
+
+    # A minute of skew, but only the rejection is logged.
+    late = fight("suspicion", occurred_at="2026-10-25T09:13:04Z")
+    with caplog.at_level(logging.WARNING, logger="app.services.ingest"):
+        outcome = await ingest(db_session, late)
 
     assert outcome == IngestOutcome(
-        IngestStatus.ACCEPTED,
-        result={
-            "outcome": "accepted",
-            "incident_id": None,
-            "event_type": event_type,
-            "run_id": "run-1",
-        },
+        IngestStatus.REJECTED, code=FailureCode.INVALID_TRANSITION
     )
-    for model in INCIDENT_ROWS:
-        assert await count(db_session, model) == 0
+    dead_letter = await only_dead_letter(db_session)
+    assert dead_letter.failure_code == "INVALID_TRANSITION"
+    assert dead_letter.payload_hash == hashlib.sha256(late).hexdigest()
+    assert await count(db_session, ProcessedEvent) == 1
+    (message,) = caplog.messages
+    assert message.startswith("event rejected: INVALID_TRANSITION")
 
 
 @pytest.mark.usefixtures("camera_id")

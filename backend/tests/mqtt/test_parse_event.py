@@ -99,6 +99,10 @@ def test_null_participant_confidence_counts_as_missing() -> None:
         ({"participants": "17"}, FailureCode.INVALID_PARTICIPANTS),
         ({"model_version": "x" * 129}, FailureCode.INVALID_FIELD),
         ({"episode_id": 5}, FailureCode.INVALID_FIELD),
+        ({"episode_id": "e" * 129}, FailureCode.INVALID_FIELD),
+        ({"episode_id": "e" * 128}, None),
+        # An empty episode is no episode; rejecting it would lose an alarm.
+        ({"episode_id": ""}, None),
         ({"run_id": "r" * 129}, FailureCode.INVALID_FIELD),
         ({"bbox": [0.1, 0.1, 1.1, 0.9]}, FailureCode.INVALID_FIELD),
         ({"bbox": [0.9, 0.1, 0.1, 0.9]}, FailureCode.INVALID_FIELD),
@@ -206,6 +210,16 @@ def test_first_failure_in_v_order_wins(
     assert code_for(valid_event() | changes) is expected
 
 
+@pytest.mark.parametrize("episode_id", ["", " ", "\t"])
+def test_blank_episode_is_no_episode(episode_id: str) -> None:
+    # A blank value must not join different fights on one camera.
+    result = parse_event(
+        json.dumps(valid_event() | {"episode_id": episode_id}).encode(), LIMITS
+    )
+    assert isinstance(result, MlEvent)
+    assert result.episode_id is None
+
+
 def test_detail_names_the_field() -> None:
     payload = valid_event()
     payload["participants"][0]["confidence"] = 1.5
@@ -262,6 +276,7 @@ def test_known_deviation_cross_field_rule_next_to_field_error() -> None:
         ("model_version", FailureCode.INVALID_FIELD),
         ("zone_id", FailureCode.INVALID_ZONE),
         ("run_id", FailureCode.INVALID_FIELD),
+        ("episode_id", FailureCode.INVALID_FIELD),
     ],
 )
 def test_nul_in_text_is_rejected(field: str, expected: FailureCode) -> None:

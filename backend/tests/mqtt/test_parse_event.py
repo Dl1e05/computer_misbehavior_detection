@@ -210,6 +210,16 @@ def test_first_failure_in_v_order_wins(
     assert code_for(valid_event() | changes) is expected
 
 
+@pytest.mark.parametrize("episode_id", ["", " ", "\t"])
+def test_blank_episode_is_no_episode(episode_id: str) -> None:
+    # A blank value must not join different fights on one camera.
+    result = parse_event(
+        json.dumps(valid_event() | {"episode_id": episode_id}).encode(), LIMITS
+    )
+    assert isinstance(result, MlEvent)
+    assert result.episode_id is None
+
+
 def test_detail_names_the_field() -> None:
     payload = valid_event()
     payload["participants"][0]["confidence"] = 1.5

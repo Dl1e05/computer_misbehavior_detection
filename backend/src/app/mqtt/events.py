@@ -176,6 +176,15 @@ class MlEvent(BaseModel):
     def _no_nul(cls, value: object) -> object:
         return _without_nul(value)
 
+    @field_validator("episode_id")
+    @classmethod
+    def _blank_episode_is_none(cls, value: str | None) -> str | None:
+        # A blank episode is no episode: it must not join two different
+        # fights, and rejecting it would lose an alarm.
+        if value is not None and not value.strip():
+            return None
+        return value
+
     @field_validator("schema_version")
     @classmethod
     def _supported_schema(cls, value: str) -> str:

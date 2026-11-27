@@ -194,7 +194,10 @@ async def _accept(
     # track later in-place changes, so the caller gets a copy.
     # If two copies of one event race, the second INSERT hits the primary key
     # and its transaction rolls back, incident included; unacknowledged, the
-    # copy comes back and is a DUPLICATE.
+    # copy comes back and is a DUPLICATE. Two first events of one fight race
+    # the same way on uq_incidents_open_episode; the loser comes back and
+    # finds the fight. So the MQTT handler must roll back and not acknowledge
+    # on any error.
     result: dict[str, Any] = {
         "outcome": "accepted",
         "incident_id": str(incident.id),

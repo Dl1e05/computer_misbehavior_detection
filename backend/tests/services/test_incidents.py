@@ -382,6 +382,7 @@ async def test_suspicion_creates_a_suspected_fight(
     assert incident.severity is Severity.CRITICAL
     assert incident.episode_id == "episode-1"
     assert incident.created_received_at == RECEIVED_AT
+    assert incident.clip_state is ClipState.NOT_REQUIRED
     (timer,) = await stored(db_session, Timer)
     assert timer.kind is TimerKind.SUSPICION_TIMEOUT
     assert timer.state is TimerState.PENDING
@@ -403,6 +404,7 @@ async def test_confirmation_makes_the_fight_new(
     assert confirmed.id == suspected.id
     (incident,) = await stored(db_session, Incident)
     assert incident.status is IncidentStatus.NEW
+    assert incident.clip_state is ClipState.PENDING
     # The confirmation's data; the fight still started at the suspicion.
     assert incident.confidence == 0.9
     assert incident.model_version == "fight-confirmation-1.0"
@@ -478,6 +480,25 @@ async def test_suspicion_after_confirmation_is_an_invalid_transition(
 
     (incident,) = await stored(db_session, Incident)
     assert incident.status is IncidentStatus.NEW
+
+
+@pytest.mark.parametrize("status", [IncidentStatus.FALSE_ALARM, IncidentStatus.CLOSED])
+async def test_suspicion_after_the_fight_ended_is_an_invalid_transition(
+    db_session: AsyncSession, camera: Camera, status: IncidentStatus
+) -> None:
+    # From the ML outbox backlog, after the operator already handled the fight.
+    ended = await handle(db_session, fight("confirmation"), camera)
+    ended.status = status
+    ended.measures = "Guards sent"
+    await db_session.flush()
+
+    with pytest.raises(InvalidTransition):
+        await handle(db_session, fight("suspicion"), camera, CONFIRMED_AT)
+
+    # A new confirmation still raises the alarm.
+    again = await handle(db_session, fight("confirmation"), camera, CONFIRMED_AT)
+    assert again.id != ended.id
+    assert again.status is IncidentStatus.NEW
 
 
 async def test_status_is_read_from_the_database(
@@ -578,3 +599,5 @@ async def test_confirmation_updates_the_suspicion_participants(
     assert [
         (row.track_id, row.confidence, row.bbox, row.version) for row in participants
     ] == [(0, 0.7, None, 1), (17, 0.95, BOX, 2)]
+    # The confidence belongs to the model that gave it.
+    assert {row.model_version for row in participants} == {"fight-confirmation-1.0"}

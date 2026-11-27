@@ -5,7 +5,7 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta
 from typing import Self
 
-from sqlalchemy import func, select, update
+from sqlalchemy import exists, func, select, update
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -23,6 +23,7 @@ from app.domain.audit import AuditObjectType, AuditResult
 from app.domain.event import TYPES_WITHOUT_PARTICIPANTS
 from app.domain.incident import (
     TERMINAL_STATUSES,
+    ClipState,
     IncidentStatus,
     TimerKind,
     TimerState,
@@ -133,6 +134,8 @@ async def handle_suspicion(
     """
     fight = await _open_fight(session, camera.id, event.episode_id)
     if fight is None:
+        if await _was_alarmed(session, camera.id, event.episode_id):
+            raise InvalidTransition("suspicion for a fight that already ended")
         return await _create_suspected(
             session,
             event,
@@ -177,8 +180,7 @@ async def handle_confirmation(
 async def _open_fight(
     session: AsyncSession, camera_id: uuid.UUID, episode_id: str | None
 ) -> Incident | None:
-    # "" is no episode either: it must not join two different fights.
-    if not episode_id:
+    if episode_id is None:
         return None
     statement = (
         select(Incident)
@@ -188,13 +190,38 @@ async def _open_fight(
             Incident.status.not_in(TERMINAL_STATUSES),
         )
         # Locked until commit, so the timer worker cannot end the fight while
-        # this event changes it. populate_existing: read the locked row, not
-        # an older copy the session may hold.
+        # this event changes it. Lock order: the incident first, then its
+        # timers; the timer worker must keep the same order, or the two can
+        # deadlock. populate_existing: read the locked row, not an older copy
+        # the session may hold.
         .with_for_update()
         .execution_options(populate_existing=True)
     )
     # At most one row: uq_incidents_open_episode.
     return await session.scalar(statement)
+
+
+# Ended after the alarm: both are reached only through NEW.
+_ENDED_AFTER_ALARM = TERMINAL_STATUSES - {IncidentStatus.NOT_CONFIRMED}
+
+
+async def _was_alarmed(
+    session: AsyncSession, camera_id: uuid.UUID, episode_id: str | None
+) -> bool:
+    # A suspicion from the ML outbox backlog may arrive after its fight was
+    # confirmed and closed. Only NOT_CONFIRMED lets the episode start again
+    # (agreed with ML). Refusing loses nothing: a new confirmation still
+    # creates its incident through T1 and T3.
+    if episode_id is None:
+        return False
+    statement = select(
+        exists().where(
+            Incident.camera_id == camera_id,
+            Incident.episode_id == episode_id,
+            Incident.status.in_(_ENDED_AFTER_ALARM),
+        )
+    )
+    return bool(await session.scalar(statement))
 
 
 async def _create_suspected(
@@ -212,10 +239,12 @@ async def _create_suspected(
         incident_type=event.incident_type,
         severity=severity_for(event.incident_type),
         status=IncidentStatus.SUSPECTED,
+        # No clip unless T3 happens; T4 needs no archive record.
+        clip_state=ClipState.NOT_REQUIRED,
         camera_id=camera.id,
         zone_id=zone.id if zone is not None else None,
         zone_version=event.zone_version if zone is not None else None,
-        episode_id=event.episode_id or None,
+        episode_id=event.episode_id,
         model_version=event.model_version,
         confidence=event.confidence,
         occurred_at=event.occurred_at,
@@ -251,6 +280,7 @@ async def _confirm(
     # run yet: the fight is still SUSPECTED, and refusing would lose an alarm.
     _require_transition(IncidentStatus.SUSPECTED, IncidentStatus.NEW, event)
     fight.status = IncidentStatus.NEW
+    fight.clip_state = ClipState.PENDING
     fight.model_version = event.model_version
     if event.confidence is not None:
         fight.confidence = event.confidence
@@ -326,6 +356,7 @@ async def _save_participants(
             index_elements=["incident_id", "run_id", "track_id"],
             set_={
                 "confidence": statement.excluded.confidence,
+                "model_version": statement.excluded.model_version,
                 "bbox": func.coalesce(statement.excluded.bbox, Participant.bbox),
                 # Core does not apply the ORM's onupdate and version counter.
                 "updated_at": func.now(),

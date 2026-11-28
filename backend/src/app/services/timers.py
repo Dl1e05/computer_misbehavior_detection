@@ -5,6 +5,7 @@ import uuid
 from datetime import datetime
 
 from sqlalchemy import select
+from sqlalchemy.exc import StatementError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.db.errors import describe, is_database_unavailable
@@ -25,17 +26,28 @@ _EXPECTED = {
 
 
 async def fire_due_timers(
-    session_factory: async_sessionmaker[AsyncSession], now: datetime
+    session_factory: async_sessionmaker[AsyncSession],
+    now: datetime,
+    *,
+    broken: set[uuid.UUID] | None = None,
 ) -> int:
+    """Fires the due timers, one transaction each; returns how many fired.
+
+    A timer that fails for a reason other than a database outage is added to
+    `broken` and left out of later calls given the same set. It stays PENDING
+    in the database, so a restart (perhaps with the bug fixed) tries it
+    again; meanwhile it cannot fill every batch and block the others.
+    """
+    statement = (
+        select(Timer.id, Timer.incident_id)
+        .where(Timer.state == TimerState.PENDING, Timer.deadline_at <= now)
+        .order_by(Timer.deadline_at)
+        .limit(BATCH)
+    )
+    if broken:
+        statement = statement.where(Timer.id.not_in(broken))
     async with session_factory() as session:
-        due = (
-            await session.execute(
-                select(Timer.id, Timer.incident_id)
-                .where(Timer.state == TimerState.PENDING, Timer.deadline_at <= now)
-                .order_by(Timer.deadline_at)
-                .limit(BATCH)
-            )
-        ).all()
+        due = (await session.execute(statement)).all()
 
     fired = 0
     for timer_id, incident_id in due:
@@ -45,7 +57,16 @@ async def fire_due_timers(
         except Exception as error:
             if is_database_unavailable(error):
                 raise
-            logger.error("timer %s failed (%s)", timer_id, describe(error))
+            if broken is not None:
+                broken.add(timer_id)
+            logger.error(
+                "timer %s failed, left until restart (%s)",
+                timer_id,
+                describe(error),
+                # Our own errors get a traceback; SQL errors would print the
+                # statement's parameters.
+                exc_info=not isinstance(error, StatementError),
+            )
     return fired
 
 

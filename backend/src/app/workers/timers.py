@@ -1,11 +1,15 @@
 """Timer worker: fires due timers every second (SRS §6.5).
 
-Run: python -m app.workers.timers   (several instances are safe: SKIP LOCKED)
+Run: python -m app.workers.timers
+
+One instance is enough. More are safe (SKIP LOCKED: no timer fires twice) but
+not faster: each reads the same due timers.
 """
 
 import asyncio
 import logging
 import signal
+import uuid
 from datetime import UTC, datetime
 
 from app.config import Settings, get_settings
@@ -27,12 +31,16 @@ MAX_DELAY = 30.0
 async def run(settings: Settings) -> None:
     engine = build_engine(settings)
     try:
-        await wait_for_database(engine)
+        await wait_for_database(engine, first_delay=TICK, max_delay=MAX_DELAY)
         sessions = create_session_factory(engine)
+        # Timers that failed in this process; tried again after a restart.
+        broken: set[uuid.UUID] = set()
         delay = TICK
         while True:
             try:
-                fired = await fire_due_timers(sessions, datetime.now(UTC))
+                fired = await fire_due_timers(
+                    sessions, datetime.now(UTC), broken=broken
+                )
             except Exception as error:
                 # Errors of single timers are handled inside; anything else
                 # is a bug and stops the worker loudly.

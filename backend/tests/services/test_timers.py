@@ -1,11 +1,12 @@
 import asyncio
+import logging
 import uuid
 from collections.abc import AsyncIterator, Sequence
 from datetime import UTC, datetime, timedelta
 
 import pytest
 from sqlalchemy import select, text
-from sqlalchemy.exc import OperationalError
+from sqlalchemy.exc import IntegrityError, OperationalError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from app.config import Settings
@@ -272,6 +273,28 @@ async def test_timer_cancelled_after_the_list_was_read_does_not_fire(
 # Failures
 
 
+def fail_for(
+    monkeypatch: pytest.MonkeyPatch, *broken_ids: uuid.UUID, error: Exception
+) -> list[uuid.UUID]:
+    """Makes _fire_one raise `error` for the given timers; returns every try."""
+    real_fire_one = timers._fire_one
+    tries: list[uuid.UUID] = []
+
+    async def fake(
+        session_factory: async_sessionmaker[AsyncSession],
+        timer_id: uuid.UUID,
+        incident_id: uuid.UUID,
+        now: datetime,
+    ) -> bool:
+        tries.append(timer_id)
+        if timer_id in broken_ids:
+            raise error
+        return await real_fire_one(session_factory, timer_id, incident_id, now)
+
+    monkeypatch.setattr(timers, "_fire_one", fake)
+    return tries
+
+
 async def test_one_broken_timer_does_not_stop_the_others(
     db_session: AsyncSession,
     camera_id: uuid.UUID,
@@ -288,23 +311,90 @@ async def test_one_broken_timer_does_not_stop_the_others(
     _, healthy = await make(
         db_session, camera_id, IncidentStatus.NEW, TimerKind.ESCALATION
     )
-    real_fire_one = timers._fire_one
+    fail_for(monkeypatch, broken.id, error=RuntimeError("bug"))
+    failed: set[uuid.UUID] = set()
 
-    async def fail_for_one(
-        session_factory: async_sessionmaker[AsyncSession],
-        timer_id: uuid.UUID,
-        incident_id: uuid.UUID,
-        now: datetime,
-    ) -> bool:
-        if timer_id == broken.id:
-            raise RuntimeError("bug")
-        return await real_fire_one(session_factory, timer_id, incident_id, now)
+    assert await fire_due_timers(sessions, DUE, broken=failed) == 1
 
-    monkeypatch.setattr(timers, "_fire_one", fail_for_one)
-
-    assert await fire_due_timers(sessions, DUE) == 1
+    assert failed == {broken.id}
     states = {timer.id: timer.state for timer in await stored(db_session, Timer)}
+    # Left PENDING, not hidden: a restart tries it again.
     assert states == {broken.id: TimerState.PENDING, healthy.id: TimerState.FIRED}
+
+
+async def test_broken_timers_do_not_fill_every_batch(
+    db_session: AsyncSession,
+    camera_id: uuid.UUID,
+    sessions: async_sessionmaker[AsyncSession],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # Two broken timers with the oldest deadlines fill a batch of two. They
+    # are tried once, then left out, so the healthy one behind them fires.
+    monkeypatch.setattr(timers, "BATCH", 2)
+    broken = [
+        (
+            await make(
+                db_session,
+                camera_id,
+                IncidentStatus.NEW,
+                TimerKind.ESCALATION,
+                deadline_at=DUE - timedelta(seconds=seconds),
+            )
+        )[1].id
+        for seconds in (2, 1)
+    ]
+    await make(db_session, camera_id, IncidentStatus.NEW, TimerKind.ESCALATION)
+    tries = fail_for(monkeypatch, *broken, error=RuntimeError("bug"))
+    failed: set[uuid.UUID] = set()
+
+    assert await fire_due_timers(sessions, DUE, broken=failed) == 0
+    assert await fire_due_timers(sessions, DUE, broken=failed) == 1
+    assert await fire_due_timers(sessions, DUE, broken=failed) == 0
+    # Each broken timer was tried once only.
+    assert sorted(tries[:2]) == sorted(broken)
+    assert len(tries) == 3
+
+
+async def test_bug_in_a_timer_is_logged_with_its_traceback(
+    db_session: AsyncSession,
+    camera_id: uuid.UUID,
+    sessions: async_sessionmaker[AsyncSession],
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    _, timer = await make(
+        db_session, camera_id, IncidentStatus.NEW, TimerKind.ESCALATION
+    )
+    fail_for(monkeypatch, timer.id, error=ValueError("fall cannot time out"))
+
+    with caplog.at_level(logging.ERROR, logger="app.services.timers"):
+        await fire_due_timers(sessions, DUE)
+
+    (record,) = caplog.records
+    assert record.exc_info is not None
+    assert "fall cannot time out" in caplog.text
+
+
+async def test_sql_error_in_a_timer_is_logged_without_values(
+    db_session: AsyncSession,
+    camera_id: uuid.UUID,
+    sessions: async_sessionmaker[AsyncSession],
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    _, timer = await make(
+        db_session, camera_id, IncidentStatus.NEW, TimerKind.ESCALATION
+    )
+    secret = "value-0.123456789"
+    error = IntegrityError("INSERT ...", {"note": secret}, Exception("duplicate"))
+    fail_for(monkeypatch, timer.id, error=error)
+
+    with caplog.at_level(logging.ERROR, logger="app.services.timers"):
+        await fire_due_timers(sessions, DUE)
+
+    (record,) = caplog.records
+    assert not record.exc_info
+    assert secret not in caplog.text
 
 
 async def test_database_outage_reaches_the_worker(

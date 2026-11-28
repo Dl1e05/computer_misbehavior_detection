@@ -132,7 +132,7 @@ async def test_worker_keeps_going_while_the_database_is_down(
 async def test_worker_stops_on_a_bug(
     migrated_db: Settings, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    async def bug(*args: object) -> int:
+    async def bug(*args: object, **kwargs: object) -> int:
         raise RuntimeError("bug outside any single timer")
 
     monkeypatch.setattr("app.workers.timers.fire_due_timers", bug)
@@ -140,3 +140,30 @@ async def test_worker_stops_on_a_bug(
     with pytest.raises(RuntimeError, match="bug outside"):
         async with asyncio.timeout(TIMEOUT):
             await worker.run(migrated_db)
+
+
+async def test_worker_tries_a_broken_timer_only_once(
+    migrated_db: Settings,
+    sessions: async_sessionmaker[AsyncSession],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # Otherwise it would be retried, and logged, on every tick forever.
+    monkeypatch.setattr(worker, "TICK", 0.01)
+    tries = 0
+
+    async def always_fails(*args: object) -> bool:
+        nonlocal tries
+        tries += 1
+        raise RuntimeError("bug")
+
+    monkeypatch.setattr("app.services.timers._fire_one", always_fails)
+    await add_due_escalation(sessions)
+
+    task = asyncio.create_task(worker.run(migrated_db))
+    try:
+        await asyncio.sleep(0.5)  # dozens of ticks
+    finally:
+        task.cancel()
+        await asyncio.gather(task, return_exceptions=True)
+
+    assert tries == 1

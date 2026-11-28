@@ -33,10 +33,9 @@ async def run(settings: Settings) -> None:
         while True:
             try:
                 fired = await fire_due_timers(sessions, datetime.now(UTC))
-                if fired:
-                    logger.info("fired %d timers", fired)
-                delay = TICK
             except Exception as error:
+                # Errors of single timers are handled inside; anything else
+                # is a bug and stops the worker loudly.
                 if not is_database_unavailable(error):
                     raise
                 logger.warning(
@@ -44,8 +43,13 @@ async def run(settings: Settings) -> None:
                     describe(error),
                     delay,
                 )
+                await asyncio.sleep(delay)
                 delay = min(delay * 2, MAX_DELAY)
-            await asyncio.sleep(delay)
+                continue
+            if fired:
+                logger.info("fired %d timers", fired)
+            delay = TICK
+            await asyncio.sleep(TICK)
     finally:
         await engine.dispose()
 

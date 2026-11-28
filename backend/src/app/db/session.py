@@ -1,3 +1,5 @@
+import asyncio
+import logging
 from collections.abc import AsyncIterator
 
 from fastapi import Request
@@ -10,6 +12,9 @@ from sqlalchemy.ext.asyncio import (
 )
 
 from app.config import Settings
+from app.db.errors import describe, is_database_unavailable
+
+logger = logging.getLogger(__name__)
 
 
 def build_engine(settings: Settings) -> AsyncEngine:
@@ -51,6 +56,33 @@ async def check_app_role_is_limited(engine: AsyncEngine) -> None:
             "DB_USER is a superuser or owns the schema; the app must connect "
             "as the limited app_runtime login"
         )
+
+
+async def wait_for_database(
+    engine: AsyncEngine,
+    *,
+    first_delay: float = 1.0,
+    max_delay: float = 30.0,
+) -> None:
+    """Checks the database login, waiting while the database is unreachable.
+
+    The worker may start before Postgres is ready (compose, reboot). An
+    unsafe login still stops it at once.
+    """
+    delay = first_delay
+    while True:
+        try:
+            await check_app_role_is_limited(engine)
+        except Exception as error:
+            if not is_database_unavailable(error):
+                raise
+            logger.warning(
+                "database not reachable (%s), retry in %.0fs", describe(error), delay
+            )
+            await asyncio.sleep(delay)
+            delay = min(delay * 2, max_delay)
+        else:
+            return
 
 
 def create_session_factory(engine: AsyncEngine) -> async_sessionmaker[AsyncSession]:

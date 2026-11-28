@@ -14,19 +14,16 @@ from collections.abc import Callable
 from datetime import UTC, datetime
 
 import aiomqtt
-from sqlalchemy.ext.asyncio import AsyncEngine
 
 from app.config import Settings, get_settings
 from app.db.session import (
     build_engine,
-    check_app_role_is_limited,
     create_session_factory,
+    wait_for_database,
 )
 from app.mqtt.consumer import (
     Ack,
     EventMessageHandler,
-    describe,
-    is_database_unavailable,
 )
 
 logger = logging.getLogger(__name__)
@@ -84,28 +81,6 @@ async def consume(
         on_saved()
 
 
-async def wait_for_database(engine: AsyncEngine) -> None:
-    """Checks the database login, waiting while the database is unreachable.
-
-    The worker may start before Postgres is ready (compose, reboot). An
-    unsafe login still stops it at once.
-    """
-    delay = FIRST_DELAY
-    while True:
-        try:
-            await check_app_role_is_limited(engine)
-        except Exception as error:
-            if not is_database_unavailable(error):
-                raise
-            logger.warning(
-                "database not reachable (%s), retry in %.0fs", describe(error), delay
-            )
-            await asyncio.sleep(delay)
-            delay = min(delay * 2, MAX_DELAY)
-        else:
-            return
-
-
 async def run(settings: Settings) -> None:
     """Consumes until cancelled, reconnecting after every failure.
 
@@ -114,7 +89,7 @@ async def run(settings: Settings) -> None:
     """
     engine = build_engine(settings)
     try:
-        await wait_for_database(engine)
+        await wait_for_database(engine, first_delay=FIRST_DELAY, max_delay=MAX_DELAY)
         handler = EventMessageHandler(create_session_factory(engine), settings)
         delay = FIRST_DELAY
 

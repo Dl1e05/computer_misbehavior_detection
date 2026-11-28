@@ -31,6 +31,7 @@ from app.db.session import (
     build_engine,
     check_app_role_is_limited,
     create_session_factory,
+    wait_for_database,
 )
 from app.domain.camera import CameraSourceType
 from app.mqtt.consumer import Ack, EventMessageHandler
@@ -336,7 +337,6 @@ async def test_worker_waits_for_the_database(
     migrated_db: Settings, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     # Started before Postgres is ready: retried, not a crash.
-    monkeypatch.setattr(worker, "FIRST_DELAY", 0.01)
     tries = 0
 
     async def not_ready_twice(engine: AsyncEngine) -> None:
@@ -346,10 +346,10 @@ async def test_worker_waits_for_the_database(
             raise ConnectionRefusedError
         await check_app_role_is_limited(engine)
 
-    monkeypatch.setattr("app.workers.events.check_app_role_is_limited", not_ready_twice)
+    monkeypatch.setattr("app.db.session.check_app_role_is_limited", not_ready_twice)
     engine = build_engine(migrated_db)
     try:
-        await worker.wait_for_database(engine)
+        await wait_for_database(engine, first_delay=0.01)
     finally:
         await engine.dispose()
     assert tries == 3
@@ -361,13 +361,12 @@ async def test_worker_stops_on_an_unsafe_database_login(
     async def unsafe(engine: AsyncEngine) -> None:
         raise UnsafeDatabaseRoleError("superuser")
 
-    monkeypatch.setattr("app.workers.events.check_app_role_is_limited", unsafe)
-    monkeypatch.setattr(worker, "FIRST_DELAY", 0.01)
+    monkeypatch.setattr("app.db.session.check_app_role_is_limited", unsafe)
     engine = build_engine(migrated_db)
     try:
         # A timeout, so waiting forever fails instead of hanging the run.
         with pytest.raises(UnsafeDatabaseRoleError):
             async with asyncio.timeout(TIMEOUT):
-                await worker.wait_for_database(engine)
+                await wait_for_database(engine, first_delay=0.01)
     finally:
         await engine.dispose()

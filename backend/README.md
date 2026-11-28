@@ -45,6 +45,7 @@ API часть проекта computermisbehaviordetection.
 5. Применить миграции: `uv run alembic upgrade head`
 6. Запустить приложение: `uv run fastapi dev src/app/main.py`
 7. Запустить обработчик событий ML (отдельный процесс, только один экземпляр): `uv run python -m app.workers.events`
+   Запустить таймеры (T4 через 10 с, эскалация через 30 с; достаточно одного экземпляра): `uv run python -m app.workers.timers`
 8. Отправить тестовое событие, как это делает ML (симулятор, только для разработки): `uv run python -m app.dev.publish_event fall`. Все варианты: `uv run python -m app.dev.publish_event --help`. Камера `cam-01` должна существовать в базе, иначе событие уйдёт в dead letters (`UNKNOWN_CAMERA`).
 
 ## Проверки
